@@ -92,10 +92,28 @@ function optionalAuth(req, res, next) {
   }
 }
 
+/* Required auth - accepts either user or admin token */
+function authRequired(req, res, next) {
+  try {
+    const token = extractTokenFromHeader(req);
+    if (!token) return res.status(401).json({ message: "No token provided" });
+
+    const decoded = verifyToken(token);
+    // Attach to user or admin based on presence of isAdmin flag in payload
+    if (decoded.isAdmin) req.admin = decoded;
+    else req.user = decoded;
+    return next();
+  } catch (err) {
+    console.error("authRequired error:", err.message || err);
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+}
+
 module.exports = {
   signToken,
   authUser,
   authAdmin,
   optionalAuth,
+  authRequired,
   verifyToken,
 };

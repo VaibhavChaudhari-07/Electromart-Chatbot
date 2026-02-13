@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import axios from "../api/axiosClient";
+import { useNavigate } from "react-router-dom";
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
 import { useCart } from "../context/CartContext";
-import { useNavigate } from "react-router-dom";
+import ProductCard from "../components/ProductCard";
 
 export default function Products() {
   const { user } = useUser();
@@ -15,232 +16,244 @@ export default function Products() {
   const [filtered, setFiltered] = useState([]);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [priceRange, setPriceRange] = useState([0, 500000]);
+  const [selectedBrands, setSelectedBrands] = useState([]);
+  const [selectedDiscounts, setSelectedDiscounts] = useState([]);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const categories = ["all", "laptops", "smartphones", "smart tvs", "wearables", "accessories"];
+  const categories = ["all", "laptops", "mobiles", "tablets", "headphones", "accessories"];
 
+  // Fetch products
   useEffect(() => {
-    axios.get("/products")
+    setLoading(true);
+    axios
+      .get("/products")
       .then((res) => {
-        console.log("Products fetched:", res.data.length);
         setProducts(res.data || []);
         setFiltered(res.data || []);
         setError(null);
       })
       .catch((err) => {
-        console.error("Error fetching products:", err);
         setError("Failed to load products. Please try again.");
         setProducts([]);
         setFiltered([]);
-      });
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  /* Search + Category Filter */
-  const applyFilters = () => {
+  // Get unique brands
+  const uniqueBrands = [...new Set(products.map((p) => p.brand).filter(Boolean))];
+
+  // Filter logic
+  useEffect(() => {
     let temp = [...products];
 
-    if (search.trim() !== "") {
-      const searchLower = search.toLowerCase();
-      temp = temp.filter((p) => {
-        const productName = (p.title || p.name || "").toLowerCase();
-        const brand = (p.brand || "").toLowerCase();
-        const description = (p.description || "").toLowerCase();
-        return (
-          productName.includes(searchLower) ||
-          brand.includes(searchLower) ||
-          description.includes(searchLower)
-        );
-      });
+    // Search filter
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      temp = temp.filter(
+        (p) =>
+          (p.title || p.name || "").toLowerCase().includes(s) ||
+          (p.brand || "").toLowerCase().includes(s) ||
+          (p.description || "").toLowerCase().includes(s)
+      );
     }
 
+    // Category filter
     if (activeCategory !== "all") {
+      temp = temp.filter(
+        (p) => (p.category || "").toLowerCase() === activeCategory.toLowerCase()
+      );
+    }
+
+    // Price range filter
+    temp = temp.filter((p) => {
+      const price = p.price || 0;
+      return price >= priceRange[0] && price <= priceRange[1];
+    });
+
+    // Brand filter
+    if (selectedBrands.length > 0) {
+      temp = temp.filter((p) => selectedBrands.includes(p.brand));
+    }
+
+    // Discount filter
+    if (selectedDiscounts.length > 0) {
       temp = temp.filter((p) => {
-        const productCategory = (p.category || "").toLowerCase();
-        return productCategory === activeCategory.toLowerCase();
+        const discount = p.discountPercentage || 0;
+        return selectedDiscounts.some((range) => {
+          if (range === "no-discount") return discount === 0;
+          if (range === "0-25") return discount > 0 && discount <= 25;
+          if (range === "25-50") return discount > 25 && discount <= 50;
+          if (range === "50+") return discount > 50;
+          return false;
+        });
       });
     }
 
     setFiltered(temp);
-  };
+  }, [search, activeCategory, priceRange, selectedBrands, selectedDiscounts, products]);
 
-  useEffect(() => applyFilters(), [search, activeCategory]);
-
-  /* Guest Mode Buttons Alert */
-  const guestAlert = () => {
-    if (!user && !admin) {
-      const ok = window.confirm("Please sign in first!\n\nOK = Close\nSign In = Go to login");
-      if (!ok) navigate("/login?mode=user");
-      return true;
+  const handleDeleteProduct = (productId) => {
+    if (window.confirm("Delete this product?")) {
+      axios
+        .delete(`/admin/delete-product/${productId}`)
+        .then(() => {
+          setProducts((prev) => prev.filter((p) => p._id !== productId));
+        })
+        .catch(() => alert("Delete failed"));
     }
-    return false;
   };
 
-  /* Buy Now */
-  const handleBuyNow = (item) => {
-    if (guestAlert()) return;
-    navigate("/checkout", { state: { product: item } });
-  };
-
-  /* Add to Cart */
-  const handleAddToCart = (item) => {
-    if (guestAlert()) return;
-    addToCart(item);
-    const ok = window.confirm("Product added to cart!\n\nOK = Close\nGo to Cart = View");
-    if (!ok) navigate("/cart");
-  };
-
-  /* Admin Delete */
-  const handleDelete = (id) => {
-    if (!window.confirm("Are you sure you want to delete this product?")) return;
-    axios.delete(`/admin/delete-product/${id}`)
-      .then(() => {
-        alert("Product deleted successfully!");
-        const updated = products.filter((p) => p._id !== id);
-        setProducts(updated);
-        setFiltered(updated);
-      })
-      .catch((err) => {
-        alert("Failed to delete product");
-        console.error(err);
-      });
+  const handleEditProduct = (productId) => {
+    navigate(`/admin/add-edit-product/${productId}`);
   };
 
   return (
-    <div className="products-container">
-      {/* Error Message */}
-      {error && (
-        <div style={{ 
-          background: "#ff6b6b", 
-          color: "white", 
-          padding: "12px", 
-          borderRadius: "8px", 
-          marginBottom: "20px",
-          textAlign: "center"
-        }}>
-          {error}
+    <div className="bg-gray-50 min-h-screen p-4 md:p-6">
+      <div className="max-w-7xl mx-auto">
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">🛍️ Products</h1>
+          <p className="text-gray-600">Discover our amazing collection of electronics</p>
         </div>
-      )}
 
-      {/* Search Bar */}
-      <input 
-        type="text" 
-        placeholder="Search products..." 
-        className="products-search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-
-      {/* Category Tabs */}
-      <div className="products-categories">
-        {categories.map((c) => (
-          <button 
-            key={c}
-            className={`category-btn ${activeCategory === c ? "active-category" : ""}`}
-            onClick={() => setActiveCategory(c)}
-          >
-            {c.toUpperCase()}
-          </button>
-        ))}
-      </div>
-
-      {/* Product Grid */}
-      {filtered.length === 0 ? (
-        <div style={{ 
-          textAlign: "center", 
-          padding: "40px 20px", 
-          color: "#666"
-        }}>
-          <h3>No products found</h3>
-          <p>Try adjusting your search or category filters.</p>
+        {/* Search Bar */}
+        <div className="mb-6">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Search products by name, brand, or description..."
+            className="input-field w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-primary focus:outline-none"
+          />
         </div>
-      ) : (
-        <div className="grid-3">
-        {filtered.map((item) => {
-          const productName = item.title || item.name || "Product";
-          const productImage = item.images?.[0] || item.imageUrl || "https://via.placeholder.com/300x200?text=No+Image";
-          const productPrice = item.price || 0;
-          const productMRP = item.mrp || item.price || 0;
-          const discount = item.discountPercentage || 0;
-          const rating = item.rating || 0;
-          const ratingCount = item.ratingCount || 0;
-          const stock = item.stock || 0;
 
-          return (
-            <div className="card product-card" key={item._id}>
-              <div className="product-img-container">
-                <img 
-                  src={productImage} 
-                  alt={productName} 
-                  className="product-img"
-                  onError={(e) => {
-                    e.target.src = "https://via.placeholder.com/300x200?text=No+Image+Available";
-                  }}
-                />
-                {discount > 0 && (
-                  <span className="discount-badge">-{discount}%</span>
-                )}
-              </div>
+        {/* Categories */}
+        <div className="mb-6 overflow-x-auto pb-2">
+          <div className="flex gap-3 min-w-min">
+            {categories.map((c) => (
+              <button
+                key={c}
+                onClick={() => setActiveCategory(c)}
+                className={`px-5 py-2 rounded-lg font-bold text-sm whitespace-nowrap transition-all ${
+                  activeCategory === c
+                    ? "bg-gradient-to-r from-primary to-primary-dark text-white shadow-lg"
+                    : "bg-white border-2 border-gray-300 text-gray-700 hover:border-primary"
+                }`}
+              >
+                {c.charAt(0).toUpperCase() + c.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
 
-              <h3 className="product-title">{productName}</h3>
-              
-              {item.brand && (
-                <p className="product-brand"><strong>Brand:</strong> {item.brand}</p>
-              )}
-
-              <p className="product-desc">{item.description?.substring(0, 80)}...</p>
-              {item.category && (
-                <p className="product-category"><small>Category: {item.category}</small></p>
-              )}
-
-              <div className="product-pricing">
-                <p className="product-price">₹{productPrice}</p>
-                {productMRP > productPrice && (
-                  <p className="product-mrp"><del>₹{productMRP}</del></p>
-                )}
-              </div>
-
-              <div className="product-info">
-                <p className="product-rating">⭐ {rating} {ratingCount > 0 ? `(${ratingCount})` : ""}</p>
-                {stock > 0 ? (
-                  <p className="product-stock" style={{ color: "green" }}>In Stock ({stock})</p>
-                ) : (
-                  <p className="product-stock" style={{ color: "red" }}>Out of Stock</p>
-                )}
-              </div>
-
-              {/* Guest + User Mode Buttons */}
-              {!admin && stock > 0 && (
-                <div className="product-actions">
-                  <button className="btn-primary" onClick={() => handleAddToCart(item)}>
-                    Add to Cart
-                  </button>
-
-                  <button className="btn-secondary" onClick={() => handleBuyNow(item)}>
-                    Buy Now
-                  </button>
-                </div>
-              )}
-
-              {!admin && stock === 0 && (
-                <button className="btn-disabled" disabled>
-                  Out of Stock
-                </button>
-              )}
-
-              {/* Admin Delete Button */}
-              {admin && (
-                <button 
-                  className="btn-danger product-delete-btn"
-                  onClick={() => handleDelete(item._id)}
-                >
-                  Delete Product
-                </button>
-              )}
+        {/* Compact Filters Bar: Price - Brand - Discount */}
+        <div className="mb-6">
+          <div className="flex gap-2 items-center w-full flex-wrap lg:flex-nowrap">
+            {/* Price small inputs */}
+            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-md px-2 py-1">
+              <input
+                type="number"
+                value={priceRange[0]}
+                onChange={(e) => setPriceRange([Number(e.target.value || 0), priceRange[1]])}
+                className="w-20 px-2 py-1 text-sm border-r border-gray-200"
+                placeholder="Min"
+              />
+              <span className="text-sm px-1">-</span>
+              <input
+                type="number"
+                value={priceRange[1]}
+                onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value || 500000)])}
+                className="w-20 px-2 py-1 text-sm"
+                placeholder="Max"
+              />
             </div>
-          );
-        })}
+
+            {/* Brand dropdown */}
+            <select
+              value={selectedBrands[0] || ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedBrands(val ? [val] : []);
+              }}
+              className="text-sm px-3 py-2 bg-white border border-gray-200 rounded-md"
+            >
+              <option value="">All Brands</option>
+              {uniqueBrands.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+
+            {/* Discount dropdown */}
+            <select
+              value={selectedDiscounts[0] || ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedDiscounts(val ? [val] : []);
+              }}
+              className="text-sm px-3 py-2 bg-white border border-gray-200 rounded-md"
+            >
+              <option value="">All Discounts</option>
+              <option value="no-discount">No Discount</option>
+              <option value="0-25">0% - 25%</option>
+              <option value="25-50">25% - 50%</option>
+              <option value="50+">50%+</option>
+            </select>
+
+            {/* Clear button */}
+            <button
+              onClick={() => {
+                setPriceRange([0, 500000]);
+                setSelectedBrands([]);
+                setSelectedDiscounts([]);
+                setSearch("");
+                setActiveCategory("all");
+              }}
+              className="px-3 py-2 bg-gray-100 rounded-md text-sm font-semibold hover:bg-gray-200"
+            >
+              Clear All
+            </button>
+          </div>
         </div>
-      )}
+
+        {/* Products Grid */}
+        {loading ? (
+          <div className="text-center py-20">
+            <p className="text-gray-600">Loading products...</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-lg">
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">📭 No products found</h3>
+            <p className="text-gray-600">Try adjusting your filters or search.</p>
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 text-gray-600 font-semibold">
+              Showing {filtered.length} product{filtered.length !== 1 ? "s" : ""}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filtered.map((item) => (
+                <ProductCard
+                  key={item._id}
+                  item={item}
+                  onDelete={handleDeleteProduct}
+                  onEdit={handleEditProduct}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

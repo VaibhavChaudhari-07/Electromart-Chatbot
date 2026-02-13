@@ -29,43 +29,19 @@ export default function AdminSignup() {
   };
 
   return (
-    <div className="admin-auth-container">
-      <h2>Create Admin Account</h2>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-2xl font-bold mb-4 text-center">Create Admin Account</h2>
 
-      {error && <p className="error-msg">{error}</p>}
+        {error && <div className="bg-secondary text-white p-3 rounded mb-4">{error}</div>}
 
-      <form onSubmit={handleSubmit} className="admin-auth-form">
-        <input
-          type="text"
-          name="name"
-          placeholder="Full Name"
-          required
-          value={form.name}
-          onChange={handleChange}
-        />
-
-        <input
-          type="email"
-          name="email"
-          placeholder="Admin Email"
-          required
-          value={form.email}
-          onChange={handleChange}
-        />
-
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          required
-          value={form.password}
-          onChange={handleChange}
-        />
-
-        <button type="submit" className="btn-primary">
-          Create Admin
-        </button>
-      </form>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input type="text" name="name" placeholder="Full Name" required value={form.name} onChange={handleChange} className="input-field w-full" />
+          <input type="email" name="email" placeholder="Admin Email" required value={form.email} onChange={handleChange} className="input-field w-full" />
+          <input type="password" name="password" placeholder="Password" required value={form.password} onChange={handleChange} className="input-field w-full" />
+          <button type="submit" className="btn-primary w-full py-2">Create Admin</button>
+        </form>
+      </div>
     </div>
   );
 }

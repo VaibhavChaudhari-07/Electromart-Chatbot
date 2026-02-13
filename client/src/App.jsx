@@ -2,9 +2,9 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 /* Layout & Common components */
-import Navbar from "./components/Navbar";
-import Footer from "./components/Footer";
+import Layout from "./components/Layout";
 import ChatbotWidget from "./components/ChatbotWidget";
+import Ai from "./pages/Ai";
 
 /* Pages - Public / User */
 import Home from "./pages/Home";
@@ -48,20 +48,17 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div
-        className="app-root"
-        style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
-      >
-        <Navbar />
-
-        {/* Main content area */}
-        <main style={{ flex: 1 }}>
-          <Routes>
-            {/* Public / Guest */}
-            <Route path="/" element={<Home />} />
-            <Route path="/products" element={<Products />} />
+      <div className="min-h-screen bg-gray-50">
+        <Routes>
+          {/* All routes use Layout wrapper for sidebar/navbar on every page */}
+          <Route element={<Layout />}>
+            {/* Public routes with sidebar/navbar */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/admin/signup" element={<AdminSignup />} />
+            <Route path="/" element={<Home />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/ai" element={<Ai />} />
 
             {/* User-only pages (protected) */}
             <Route
@@ -105,7 +102,7 @@ export default function App() {
               }
             />
 
-            {/* Admin routes (prefix /admin) */}
+            {/* Admin routes */}
             <Route
               path="/admin/home"
               element={
@@ -154,31 +151,21 @@ export default function App() {
                 </RequireAdmin>
               }
             />
+          </Route>
 
-            <Route 
-              path="/admin/signup" 
-              element={
-                  <AdminSignup />
-              } 
-            />
+          {/* 404 page (renders without Layout) */}
+          <Route
+            path="/404"
+            element={
+              <div className="text-center py-12">
+                <h2 className="text-2xl font-bold">Page not found</h2>
+              </div>
+            }
+          />
 
-            {/* Fallbacks */}
-            <Route
-              path="/404"
-              element={
-                <div style={{ padding: 40 }}>
-                  <h2>Page not found</h2>
-                </div>
-              }
-            />
-            <Route path="*" element={<Navigate to="/404" replace />} />
-          </Routes>
-        </main>
-
-        <Footer />
-
-        {/* Chatbot - placed outside routes so it shows on every page */}
-        <ChatbotWidget />
+          {/* catch-all redirects to 404 */}
+          <Route path="*" element={<Navigate to="/404" replace />} />
+        </Routes>
       </div>
     </BrowserRouter>
   );

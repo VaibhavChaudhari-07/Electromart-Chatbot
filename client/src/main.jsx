@@ -9,7 +9,7 @@ import { CartProvider } from "./context/CartContext";
 import { ChatbotProvider } from "./context/ChatbotContext";
 
 /* Global CSS */
-import "../style.css";
+import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

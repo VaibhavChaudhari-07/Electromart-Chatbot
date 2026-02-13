@@ -88,247 +88,221 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="admin-dashboard">
-        <h2>📊 Admin Dashboard</h2>
-        <p>Loading dashboard data...</p>
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">📊 Admin Dashboard</h2>
+          <p>Loading dashboard data...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="admin-dashboard">
-      <h2>📊 Admin Dashboard</h2>
-
-      {/* Tab Navigation */}
-      <div className="dashboard-tabs">
-        <button
-          className={`tab-btn ${activeTab === "metrics" ? "active" : ""}`}
-          onClick={() => setActiveTab("metrics")}
-        >
-          📈 Data Metrics
-        </button>
-        <button
-          className={`tab-btn ${activeTab === "orders" ? "active" : ""}`}
-          onClick={() => setActiveTab("orders")}
-        >
-          📋 Order Management
-        </button>
-        <button
-          className={`tab-btn ${activeTab === "stock" ? "active" : ""}`}
-          onClick={() => setActiveTab("stock")}
-        >
-          📦 Stock Management
-        </button>
-      </div>
-
-      {/* SECTION 1: DATA METRICS */}
-      {activeTab === "metrics" && (
-        <div className="dashboard-section">
-          <h3>📊 Data Metrics</h3>
-
-          {/* Summary Cards */}
-          <div className="metrics-cards">
-            <div className="metric-card">
-              <p className="metric-label">Total Products</p>
-              <p className="metric-value">{stats.totalProducts}</p>
-            </div>
-
-            <div className="metric-card">
-              <p className="metric-label">Total Orders</p>
-              <p className="metric-value">{orderStats.totalOrders}</p>
-            </div>
-
-            <div className="metric-card">
-              <p className="metric-label">Delivered</p>
-              <p className="metric-value green">{orderStats.deliveredOrders}</p>
-            </div>
-
-            <div className="metric-card">
-              <p className="metric-label">Pending</p>
-              <p className="metric-value orange">{orderStats.pendingOrders}</p>
-            </div>
-          </div>
-
-          {/* Products Per Category */}
-          <div className="metrics-table">
-            <h4>Products Per Category</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.productsPerCategory.map((cat, i) => (
-                  <tr key={i}>
-                    <td>{cat._id}</td>
-                    <td>{cat.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Orders Per Month */}
-          <div className="metrics-table">
-            <h4>Orders Per Month (Last 12 Months)</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>Orders</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orderStats.ordersPerMonth.map((month, i) => (
-                  <tr key={i}>
-                    <td>{month._id}</td>
-                    <td>{month.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-3xl font-bold">📊 Admin Dashboard</h2>
+          <div className="space-x-2">
+            <button className={`px-4 py-2 rounded ${activeTab==='metrics'?'bg-primary text-white':''}`} onClick={() => setActiveTab('metrics')}>📈 Data Metrics</button>
+            <button className={`px-4 py-2 rounded ${activeTab==='orders'?'bg-primary text-white':''}`} onClick={() => setActiveTab('orders')}>📋 Order Management</button>
+            <button className={`px-4 py-2 rounded ${activeTab==='stock'?'bg-primary text-white':''}`} onClick={() => setActiveTab('stock')}>📦 Stock Management</button>
           </div>
         </div>
-      )}
 
-      {/* SECTION 2: ORDER MANAGEMENT */}
-      {activeTab === "orders" && (
-        <div className="dashboard-section">
-          <h3>📋 Order Management</h3>
+        {/* Metrics Tab */}
+        {activeTab === 'metrics' && (
+          <div className="space-y-8">
+            {/* Key Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="card p-8 shadow-lg hover:shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Products</p>
+                    <p className="text-4xl font-bold text-primary mt-2">{stats.totalProducts}</p>
+                  </div>
+                  <div className="text-5xl opacity-20">📦</div>
+                </div>
+              </div>
 
-          <div className="orders-management">
+              <div className="card p-8 shadow-lg hover:shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Orders</p>
+                    <p className="text-4xl font-bold text-accent mt-2">{orderStats.totalOrders}</p>
+                  </div>
+                  <div className="text-5xl opacity-20">📋</div>
+                </div>
+              </div>
+
+              <div className="card p-8 shadow-lg hover:shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Delivered</p>
+                    <p className="text-4xl font-bold text-green-600 mt-2">{orderStats.deliveredOrders}</p>
+                    <p className="text-xs text-gray-500 mt-1">({Math.round((orderStats.deliveredOrders / orderStats.totalOrders) * 100)}%)</p>
+                  </div>
+                  <div className="text-5xl opacity-20">✓</div>
+                </div>
+              </div>
+
+              <div className="card p-8 shadow-lg hover:shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Pending</p>
+                    <p className="text-4xl font-bold text-yellow-600 mt-2">{orderStats.pendingOrders}</p>
+                    <p className="text-xs text-gray-500 mt-1">({Math.round((orderStats.pendingOrders / orderStats.totalOrders) * 100)}%)</p>
+                  </div>
+                  <div className="text-5xl opacity-20">⏳</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Products by Category */}
+            <div className="card p-8 shadow-lg">
+              <h3 className="text-2xl font-bold text-gray-900 mb-6">Products by Category</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                {stats.productsPerCategory?.map((cat) => (
+                  <div key={cat.category} className="bg-gradient-to-br from-gray-50 to-gray-100 p-6 rounded-xl border-2 border-gray-200 hover:border-primary transition-all duration-200">
+                    <div className="text-3xl font-bold text-primary mb-2">{cat.count}</div>
+                    <p className="text-sm font-semibold text-gray-700">{cat.category}</p>
+                    <p className="text-xs text-gray-500 mt-2">{Math.round((cat.count / stats.totalProducts) * 100)}% of total</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Monthly Orders Chart */}
+            <div className="card p-8 shadow-lg">
+              <h3 className="text-2xl font-bold text-gray-900 mb-6">Orders per Month</h3>
+              <div className="space-y-3">
+                {orderStats.ordersPerMonth?.map((month, idx) => (
+                  <div key={idx} className="flex items-center gap-4">
+                    <div className="w-32 font-semibold text-gray-700">{month.month}</div>
+                    <div className="flex-1 bg-gray-200 rounded-lg overflow-hidden h-12">
+                      <div 
+                        className="bg-gradient-to-r from-primary to-accent h-full flex items-center justify-end pr-4 font-bold text-white transition-all duration-300"
+                        style={{ width: `${(month.orders / (Math.max(...orderStats.ordersPerMonth.map(m => m.orders), 1)) * 100)}%` }}
+                      >
+                        {month.orders}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Orders Tab */}
+        {activeTab === 'orders' && (
+          <div className="space-y-6">
             {orders.length === 0 ? (
-              <p>No orders found</p>
+              <div className="card p-12 text-center shadow-lg">
+                <div className="text-5xl mb-4">📭</div>
+                <p className="text-lg font-semibold text-gray-600">No orders found</p>
+              </div>
             ) : (
-              orders.map((order) => {
+              orders.map(order => {
                 const nextStage = getNextStage(order);
                 return (
-                  <div className="order-management-card" key={order._id}>
-                    {/* Order Header */}
-                    <div className="order-mgmt-header">
+                  <div key={order._id} className="card p-8 shadow-lg hover:shadow-2xl">
+                    <div className="flex justify-between items-start mb-6 pb-6 border-b border-gray-200">
                       <div>
-                        <h4>Order #{order._id.slice(-8)}</h4>
-                        <p className="order-date">
-                          {new Date(order.createdAt).toLocaleDateString("en-IN")}
-                        </p>
+                        <h4 className="text-2xl font-bold text-gray-900">Order #{order._id.slice(-8).toUpperCase()}</h4>
+                        <p className="text-sm text-gray-600 mt-1">{new Date(order.createdAt).toLocaleDateString('en-IN')}</p>
                       </div>
-                      <div className="order-mgmt-status">
-                        <span className="status-badge">{order.status.toUpperCase()}</span>
-                        <p className="total">₹{order.totalAmount}</p>
+                      <div>
+                        <div className="text-right">
+                          <div className="text-3xl font-bold text-primary">₹{order.totalAmount}</div>
+                          <div className="text-xs text-gray-500 font-semibold mt-1">{order.items.length} items</div>
+                        </div>
                       </div>
                     </div>
 
-                    {/* User Details */}
-                    <div className="order-user-details">
-                      <div>
-                        <p><strong>Customer:</strong> {order.userId?.name}</p>
-                        <p><strong>Email:</strong> {order.userId?.email}</p>
-                        <p><strong>Phone:</strong> {order.userId?.phone}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 pb-6 border-b border-gray-200">
+                      <div className="card p-4 bg-gray-50">
+                        <p className="text-xs font-bold text-gray-600 uppercase mb-2">Customer</p>
+                        <p className="font-bold text-gray-900">{order.userId?.name || 'N/A'}</p>
+                        <p className="text-sm text-gray-600">{order.userId?.email}</p>
+                        <p className="text-sm text-gray-600">{order.userId?.phone}</p>
                       </div>
-                      <div>
-                        <p><strong>Address:</strong> {order.address?.fullAddress || order.address}</p>
-                        <p><strong>Pincode:</strong> {order.pin}</p>
+                      <div className="card p-4 bg-gray-50">
+                        <p className="text-xs font-bold text-gray-600 uppercase mb-2">Delivery Address</p>
+                        <p className="text-sm font-semibold text-gray-900">{order.address?.fullAddress || order.address}</p>
+                        <p className="text-sm text-gray-600">PIN: {order.pin}</p>
+                      </div>
+                      <div className="card p-4 bg-gray-50">
+                        <p className="text-xs font-bold text-gray-600 uppercase mb-2">Items</p>
+                        <div className="space-y-1">
+                          {order.items.slice(0, 3).map((it, idx) => (
+                            <p key={idx} className="text-sm text-gray-700">
+                              • {it.title} <span className="text-gray-600">x{it.quantity}</span>
+                            </p>
+                          ))}
+                          {order.items.length > 3 && <p className="text-sm text-primary font-semibold">+ {order.items.length - 3} more</p>}
+                        </div>
                       </div>
                     </div>
 
-                    {/* Order Items */}
-                    <div className="order-items-mgmt">
-                      <p><strong>Items:</strong></p>
-                      {order.items.map((item, idx) => (
-                        <p key={idx} className="item-line">
-                          • {item.title} (x{item.quantity}) - ₹{item.price * item.quantity}
-                        </p>
-                      ))}
-                    </div>
-
-                    {/* Stage Buttons */}
-                    <div className="order-stages-mgmt">
-                      <button
-                        className={`stage-btn ${order.stages.packing.completed ? "completed" : ""}`}
-                        onClick={() => handleUpdateOrderStage(order._id, "packing")}
-                        disabled={updatingStage === order._id}
-                      >
-                        ✓ Packing
-                      </button>
-                      <button
-                        className={`stage-btn ${order.stages.shipped.completed ? "completed" : ""}`}
-                        onClick={() => handleUpdateOrderStage(order._id, "shipped")}
-                        disabled={updatingStage === order._id || !order.stages.packing.completed}
-                      >
-                        ✓ Shipped
-                      </button>
-                      <button
-                        className={`stage-btn ${order.stages.outForDelivery.completed ? "completed" : ""}`}
-                        onClick={() => handleUpdateOrderStage(order._id, "outForDelivery")}
-                        disabled={updatingStage === order._id || !order.stages.shipped.completed}
-                      >
-                        ✓ Out for Delivery
-                      </button>
-                      <button
-                        className={`stage-btn ${order.stages.delivered.completed ? "completed" : ""}`}
-                        onClick={() => handleUpdateOrderStage(order._id, "delivered")}
-                        disabled={updatingStage === order._id || !order.stages.outForDelivery.completed}
-                      >
-                        ✓ Delivered
-                      </button>
+                    {/* Delivery Stages */}
+                    <div className="mb-6">
+                      <p className="text-sm font-bold text-gray-700 uppercase mb-4">Delivery Stages</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { key: 'packing', label: '📋 Packing', color: 'from-blue-500 to-blue-600' },
+                          { key: 'shipped', label: '🚚 Shipped', color: 'from-purple-500 to-purple-600' },
+                          { key: 'outForDelivery', label: '📍 Out for Delivery', color: 'from-orange-500 to-orange-600' },
+                          { key: 'delivered', label: '✓ Delivered', color: 'from-green-500 to-green-600' },
+                        ].map((stage) => (
+                          <button
+                            key={stage.key}
+                            onClick={() => handleUpdateOrderStage(order._id, stage.key)}
+                            disabled={updatingStage === order._id || order.stages[stage.key]?.completed}
+                            className={`py-3 px-2 rounded-lg font-bold text-white transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                              order.stages[stage.key]?.completed
+                                ? `bg-gradient-to-r ${stage.color}`
+                                : 'bg-gray-300 hover:bg-gray-400'
+                            }`}
+                          >
+                            {stage.label}
+                          </button>
+                        ))}
+                      </div>
+                      {updatingStage === order._id && <p className="text-sm text-primary font-semibold mt-2">Updating...</p>}
                     </div>
                   </div>
                 );
               })
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* SECTION 3: STOCK MANAGEMENT */}
-      {activeTab === "stock" && (
-        <div className="dashboard-section">
-          <h3>📦 Stock Management (Stock &lt; 5)</h3>
-
-          {lowStockProducts.length === 0 ? (
-            <p className="stock-okay">✓ All products have sufficient stock!</p>
-          ) : (
-            <div className="stock-items">
-              {lowStockProducts.map((product) => (
-                <div className="low-stock-item" key={product._id}>
-                  <div className="stock-product-info">
-                    <h4>{product.name}</h4>
-                    <p>Category: {product.category}</p>
-                    <p>Brand: {product.brand}</p>
-                    <p className="stock-warning">
-                      ⚠️ Current Stock: <strong>{product.stock}</strong> units
-                    </p>
+        {/* Stock Tab */}
+        {activeTab === 'stock' && (
+          <div className="bg-white p-4 rounded-lg shadow">
+            <h3 className="font-semibold mb-4">📦 Stock Management (Stock &lt; 5)</h3>
+            {lowStockProducts.length === 0 ? (
+              <div className="text-green-600 font-semibold">✓ All products have sufficient stock!</div>
+            ) : (
+              <div className="space-y-4">
+                {lowStockProducts.map(product => (
+                  <div key={product._id} className="flex items-center justify-between bg-gray-50 p-3 rounded">
+                    <div>
+                      <h4 className="font-semibold">{product.name}</h4>
+                      <p className="text-sm text-gray-600">Category: {product.category} • Brand: {product.brand}</p>
+                      <p className="text-sm text-red-600 mt-1">⚠️ Current Stock: <strong>{product.stock}</strong> units</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min="1" placeholder="Qty" value={stockInput[product._id] || ''} onChange={(e) => setStockInput({...stockInput, [product._id]: e.target.value})} className="input-field w-32" />
+                      <button onClick={() => handleAddStock(product._id)} className="btn-primary">{addingStock===product._id?'Adding...':'Add Stock'}</button>
+                    </div>
                   </div>
-
-                  <div className="add-stock-group">
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="Add quantity"
-                      value={stockInput[product._id] || ""}
-                      onChange={(e) =>
-                        setStockInput({
-                          ...stockInput,
-                          [product._id]: e.target.value,
-                        })
-                      }
-                    />
-                    <button
-                      className="btn-primary"
-                      onClick={() => handleAddStock(product._id)}
-                      disabled={addingStock === product._id}
-                    >
-                      {addingStock === product._id ? "Adding..." : "Add Stock"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

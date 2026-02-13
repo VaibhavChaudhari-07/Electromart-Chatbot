@@ -1,6 +1,7 @@
 // server/controllers/orderController.js
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const { embedOrderOnCreation, updateOrderEmbedding } = require("../rag/embeddingManager");
 
 // CREATE ORDER - WITH STOCK VALIDATION AND UPDATE
 exports.createOrder = async (req, res) => {
@@ -42,7 +43,10 @@ exports.createOrder = async (req, res) => {
     // Step 2: Create the order
     const order = await Order.create(req.body);
 
-    // Step 3: Update stock for all items
+    // Step 3: Create embedding for the order immediately
+    await embedOrderOnCreation(order);
+
+    // Step 4: Update stock for all items
     for (const item of items) {
       await Product.findByIdAndUpdate(
         item.productId,
@@ -121,6 +125,10 @@ exports.updateOrderStage = async (req, res) => {
     }
 
     await order.save();
+    
+    // Update embedding with new order status
+    await updateOrderEmbedding(order._id);
+    
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: "Failed to update order stage" });

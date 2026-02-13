@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import axios from "../api/axiosClient";
 
-export default function ChatbotWidget() {
-  const [open, setOpen] = useState(false);
+export default function ChatbotWidget({ startOpen = false }) {
+  const [open, setOpen] = useState(!!startOpen);
   const [messages, setMessages] = useState([
     { sender: "bot", text: "Hello! How can I help you today?" }
   ]);

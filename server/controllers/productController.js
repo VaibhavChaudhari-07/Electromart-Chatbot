@@ -1,5 +1,6 @@
 // server/controllers/productController.js
 const Product = require("../models/Product");
+const { embedProductOnCreation, updateProductEmbedding } = require("../rag/embeddingManager");
 
 // GET all products
 exports.getAllProducts = async (req, res) => {
@@ -26,6 +27,10 @@ exports.getProductById = async (req, res) => {
 exports.addProduct = async (req, res) => {
   try {
     const product = await Product.create(req.body);
+    
+    // Create embedding immediately
+    await embedProductOnCreation(product);
+    
     res.json(product);
   } catch (err) {
     res.status(500).json({ message: "Failed to add product", error: err.message });
@@ -41,6 +46,10 @@ exports.editProduct = async (req, res) => {
       { new: true, runValidators: true }
     );
     if (!product) return res.status(404).json({ message: "Product not found" });
+    
+    // Update embedding with new product data
+    await updateProductEmbedding(product._id);
+    
     res.json(product);
   } catch (err) {
     res.status(500).json({ message: "Failed to update product", error: err.message });

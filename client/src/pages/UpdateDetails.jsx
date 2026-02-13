@@ -41,64 +41,70 @@ export default function UpdateDetails() {
 
   if (!user) {
     return (
-      <div className="update-container">
-        <h2>Please login to update your details</h2>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Please sign in to update your details</h2>
+          <button onClick={() => navigate('/login')} className="btn-primary mt-4 px-6 py-2">Sign In</button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="update-container">
-      <h2>Update Account Details</h2>
+    <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+      <div className="w-full max-w-2xl bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-2xl font-bold mb-4">Update Account Details</h2>
 
-      <div className="update-card card">
-        {/* Name */}
-        <input
-          type="text"
-          name="name"
-          value={form.name}
-          onChange={handleChange}
-          placeholder="Full Name"
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input
+            type="text"
+            name="name"
+            value={form.name}
+            onChange={handleChange}
+            placeholder="Full Name"
+            className="input-field w-full"
+          />
 
-        {/* Email (Fixed) */}
-        <input
-          type="email"
-          value={user.email}
-          readOnly
-          className="update-disabled"
-        />
+          <input
+            type="email"
+            value={user.email}
+            readOnly
+            className="input-field w-full bg-gray-100"
+          />
 
-        {/* Phone */}
-        <input
-          type="text"
-          name="phone"
-          value={form.phone}
-          onChange={handleChange}
-          placeholder="Phone Number"
-        />
+          <input
+            type="text"
+            name="phone"
+            value={form.phone}
+            onChange={handleChange}
+            placeholder="Phone Number"
+            className="input-field w-full"
+          />
 
-        {/* Address */}
-        <textarea
-          name="address"
-          value={form.address}
-          onChange={handleChange}
-          placeholder="Full Address"
-          rows="3"
-        ></textarea>
+          <input
+            type="text"
+            name="pin"
+            value={form.pin}
+            onChange={handleChange}
+            placeholder="Pin Code"
+            className="input-field w-full"
+          />
 
-        {/* Pin */}
-        <input
-          type="text"
-          name="pin"
-          value={form.pin}
-          onChange={handleChange}
-          placeholder="Pin Code"
-        />
+          <textarea
+            name="address"
+            value={form.address}
+            onChange={handleChange}
+            placeholder="Full Address"
+            rows="3"
+            className="input-field w-full md:col-span-2"
+          ></textarea>
+        </div>
 
-        <button className="btn-primary update-btn" onClick={handleUpdate}>
-          Save Changes
-        </button>
+        <div className="mt-6">
+          <button className="btn-primary px-6 py-2" onClick={handleUpdate}>
+            Save Changes
+          </button>
+        </div>
       </div>
     </div>
   );
