@@ -24,14 +24,18 @@ async function initializeRAG() {
     let embeddedCount = 0;
     for (const product of products) {
       try {
-        const text = `${product.title} ${product.description} ${(
+        if (!product._id) {
+          console.warn(`[RAG] Skipping product with missing _id:`, product);
+          continue;
+        }
+        const text = `${product.title || product.name} ${product.description || ''} ${(
           product.features || []
-        ).join(" ")}`;
+        ).join(" ")} ${product.category || ''}`;
 
         const embedding = await embedQuery(text);
 
         await upsertEmbedding(product._id, embedding, {
-          title: product.title,
+          title: product.title || product.name,
           description: product.description,
           category: product.category,
           price: product.price,

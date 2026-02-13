@@ -10,6 +10,12 @@ const ChatSchema = new mongoose.Schema(
         sender: { type: String, enum: ["user", "bot"], required: true },
         text: { type: String, required: true },
         ts: { type: Number, required: true },
+        // Allow optional product cards (persisted from bot responses)
+        cards: [
+          {
+            type: mongoose.Schema.Types.Mixed,
+          },
+        ],
       },
     ],
     createdAt: { type: Number, default: Date.now },

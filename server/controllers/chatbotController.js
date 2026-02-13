@@ -32,12 +32,34 @@ exports.chatbotReply = async (req, res) => {
 
     console.log(`[Response] Generated ${answer.length} characters`);
 
+    // Map product items to UI-friendly card objects when available
+    let cards = [];
+    try {
+      if (context.items && Array.isArray(context.items) && context.items.length > 0) {
+        // Only expose safe fields for frontend card rendering
+        cards = context.items.map((it) => ({
+          id: it._id || it.productId || it.orderId || null,
+          title: it.title || it.name || it.productName || "Product",
+          price: it.price || it.totalAmount || null,
+          rating: it.rating || null,
+          image: (it.images && it.images[0]) || it.imageUrl || null,
+          features: it.features || [],
+          stock: typeof it.stock !== "undefined" ? it.stock : null,
+          category: it.category || null,
+          snippet: it.description ? (it.description.length > 140 ? it.description.slice(0, 140) + "..." : it.description) : null,
+        }));
+      }
+    } catch (mapErr) {
+      console.error("Error mapping cards:", mapErr.message);
+    }
+
     res.json({
       response: answer,
       intent: intentObj.intent,
       confidence: intentObj.confidence,
       retrievalMethod: context.retrievalType || "none",
       datapoints: context.items?.length || 0,
+      cards,
     });
   } catch (err) {
     console.error("Chatbot error:", err);

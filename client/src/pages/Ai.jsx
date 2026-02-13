@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from "react";
 import axios from "../api/axiosClient";
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
+import { useCart } from "../context/CartContext";
+import { useNavigate } from "react-router-dom";
 
 export default function Ai() {
   const { user } = useUser();
@@ -113,6 +115,9 @@ export default function Ai() {
         sender: "bot",
         text: res.data.response || "(no response)",
         ts: Date.now(),
+        cards: res.data.cards || [],  // ← CAPTURE CARDS FROM RESPONSE
+        intent: res.data.intent,
+        confidence: res.data.confidence,
       };
       const updated2 = [...updated, botMsg];
       setMessages(updated2);
@@ -147,6 +152,111 @@ export default function Ai() {
   const formatTime = (ts) => {
     const date = new Date(ts);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Render a single product card
+  const ProductCard = ({ card }) => {
+    if (!card) return null;
+    const { addToCart } = useCart();
+    const navigateLocal = useNavigate();
+    const axiosLocal = axios;
+    const handleViewDetails = async () => {
+      try {
+        const res = await axiosLocal.get(`/products/${card.id}`);
+        const fullProduct = res.data;
+        navigateLocal(`/product/${card.id}`, { state: { product: fullProduct } });
+      } catch (err) {
+        window.alert("Failed to load product details.");
+      }
+    };
+    const handleAddToCart = () => {
+      addToCart({ _id: card.id, title: card.title, price: card.price, image: card.image });
+      window.alert("Product added to cart!");
+    };
+    const handleBuyNow = () => {
+      navigateLocal("/checkout", { state: { product: { _id: card.id, title: card.title, price: card.price, image: card.image } } });
+    };
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 hover:shadow-md transition w-full sm:w-72">
+        {/* Image */}
+        <div className="mb-3 bg-gray-100 rounded h-40 flex items-center justify-center overflow-hidden">
+          {card.image ? (
+            <img src={card.image} alt={card.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className="text-gray-400 text-4xl">📦</div>
+          )}
+        </div>
+
+        {/* Badge & Discount */}
+        <div className="flex justify-between items-start mb-2">
+          {card.category && (
+            <span className="bg-primary text-white text-xs px-2 py-1 rounded">{card.category}</span>
+          )}
+          {card.discount && (
+            <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
+              {card.discount}
+            </span>
+          )}
+        </div>
+
+        {/* Title */}
+        <h3 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{card.title}</h3>
+
+        {/* Rating */}
+        {card.rating && (
+          <div className="flex items-center gap-1 mb-2">
+            <span className="text-yellow-500">⭐</span>
+            <span className="text-sm font-semibold">{card.rating}</span>
+            <span className="text-xs text-gray-500">(Reviews)</span>
+          </div>
+        )}
+
+        {/* Stock Status */}
+        {card.stock !== null && (
+          <div className="text-xs mb-2">
+            {card.stock > 0 ? (
+              <span className="text-green-600">✓ {card.stock} in stock</span>
+            ) : (
+              <span className="text-red-600">✗ Out of stock</span>
+            )}
+          </div>
+        )}
+
+        {/* Features */}
+        {card.features && card.features.length > 0 && (
+          <div className="text-xs text-gray-700 mb-3">
+            <ul className="list-disc list-inside space-y-0.5">
+              {card.features.slice(0, 3).map((f, i) => (
+                <li key={i} className="truncate">{f}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Snippet */}
+        {card.snippet && (
+          <p className="text-xs text-gray-600 mb-3 line-clamp-2">{card.snippet}</p>
+        )}
+
+        {/* Price & Buttons */}
+        <div className="border-t border-gray-200 pt-3">
+          {card.price && (
+            <div className="text-lg font-bold text-primary mb-2">₹{card.price.toLocaleString()}</div>
+          )}
+          <div className="flex gap-2">
+            <button className="flex-1 bg-blue-600 text-white text-xs font-semibold py-2 rounded hover:bg-blue-700 transition" onClick={handleViewDetails}>
+              View Details
+            </button>
+            <button className="flex-1 bg-primary text-white text-xs font-semibold py-2 rounded hover:bg-primary-dark transition" onClick={handleAddToCart}>
+              🛒 Cart
+            </button>
+            <button className="flex-1 bg-orange-500 text-white text-xs font-semibold py-2 rounded hover:bg-orange-600 transition" onClick={handleBuyNow}>
+              Buy
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (!currentUser) {
@@ -277,26 +387,36 @@ export default function Ai() {
             )}
 
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}
-              >
+              <div key={i}>
                 <div
-                  className={`max-w-xs lg:max-w-md xl:max-w-lg ${
-                    m.sender === "user"
-                      ? "bg-gradient-to-r from-primary to-primary-dark text-white rounded-3xl rounded-tr-none"
-                      : "bg-gray-100 text-gray-900 rounded-3xl rounded-tl-none"
-                  } px-4 py-3 shadow-sm`}
+                  className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}
                 >
-                  <p className="text-sm lg:text-base break-words">{m.text}</p>
                   <div
-                    className={`text-xs mt-1 ${
-                      m.sender === "user" ? "text-white/70" : "text-gray-500"
-                    }`}
+                    className={`max-w-xs lg:max-w-md xl:max-w-lg ${
+                      m.sender === "user"
+                        ? "bg-gradient-to-r from-primary to-primary-dark text-white rounded-3xl rounded-tr-none"
+                        : "bg-gray-100 text-gray-900 rounded-3xl rounded-tl-none"
+                    } px-4 py-3 shadow-sm`}
                   >
-                    {formatTime(m.ts)}
+                    <p className="text-sm lg:text-base break-words">{m.text}</p>
+                    <div
+                      className={`text-xs mt-1 ${
+                        m.sender === "user" ? "text-white/70" : "text-gray-500"
+                      }`}
+                    >
+                      {formatTime(m.ts)}
+                    </div>
                   </div>
                 </div>
+
+                {/* Render product cards if bot message has them */}
+                {m.sender === "bot" && m.cards && m.cards.length > 0 && (
+                  <div className="mt-4 flex-start flex flex-wrap gap-3">
+                    {m.cards.map((card, idx) => (
+                      <ProductCard key={idx} card={card} />
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
 

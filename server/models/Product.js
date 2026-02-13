@@ -20,7 +20,8 @@ const ProductSchema = new mongoose.Schema(
     images: [{ type: String }],
     imageUrl: { type: String },
     features: [{ type: String }],
-    specifications: { type: String, default: "" },
+    // allow specifications to be an object, array, or string
+    specifications: { type: mongoose.Schema.Types.Mixed, default: {} },
     warranty: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
   },

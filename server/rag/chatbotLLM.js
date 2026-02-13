@@ -50,7 +50,7 @@ module.exports.generateFinalAnswer = async function ({ query, intent, context })
 };
 
 /**
- * Product Semantic Search Response
+ * Product Semantic Search Response - Enhanced with Specification Matching
  */
 function generateProductSemanticResponse(query, context) {
   const products = context.items || [];
@@ -59,23 +59,47 @@ function generateProductSemanticResponse(query, context) {
     return `I couldn't find products matching your query "${query}". Try searching for a specific product name or category.`;
   }
 
-  let response = `I found ${products.length} product(s) based on your search for: **${query}**\n\n`;
+  let response = `I found **${products.length}** products matching your request for: **${query}**\n\n`;
+
+  // Add category-based intro if available
+  if (context.categoryMatches && Object.keys(context.categoryMatches).length > 0) {
+    const categories = Object.keys(context.categoryMatches);
+    response += `📂 **Categories:** ${categories.join(', ')}\n\n`;
+  }
+
+  response += `🏆 **Top Recommendations:**\n`;
 
   products.slice(0, 5).forEach((p, i) => {
     const title = p.title || p.description || "Product";
-    const price = p.price ? `₹${p.price}` : "Price not available";
+    const price = p.price ? `₹${p.price.toLocaleString()}` : "Price not available";
     const rating = p.rating ? `⭐ ${p.rating}/5` : "";
-    const features = p.features
-      ? `• Features: ${p.features.slice(0, 3).join(", ")}`
+    const categoryBadge = p.category ? `[${p.category}]` : "";
+    
+    // Show specification matches if available
+    let specInfo = '';
+    if (p.matchedSpecs && p.matchedSpecs.length > 0) {
+      specInfo = `\n   ✓ Matched specs: ${p.matchedSpecs.join(', ')}`;
+    } else if (p.specifications) {
+      const specArray = [];
+      if (p.specifications.processor) specInfo += p.specifications.processor + ', ';
+      if (p.specifications.ram) specInfo += p.specifications.ram + ', ';
+      if (p.specifications.storage) specInfo += p.specifications.storage + ', ';
+      if (p.specifications.battery_life) specInfo += p.specifications.battery_life + ' battery';
+      specInfo = specInfo ? `\n   ⚙️ ${specInfo.replace(/,\s*$/, '')}` : '';
+    }
+
+    const features = p.features && p.features.length > 0
+      ? `\n   🎯 ${p.features.slice(0, 2).join(', ')}`
       : "";
 
-    response += `\n**${i + 1}. ${title}**\n`;
-    response += `   ${price} ${rating}\n`;
-    if (p.description) response += `   ${p.description.slice(0, 100)}...\n`;
-    if (features) response += `   ${features}\n`;
+    response += `\n**${i + 1}. ${categoryBadge} ${title}**`;
+    response += `\n   💰 ${price} ${rating}`;
+    response += specInfo;
+    response += features;
+    if (p.stock) response += `\n   📦 ${p.stock > 0 ? '✓ In Stock' : '❌ Out of Stock'}`;
   });
 
-  response += `\n💡 Would you like more details about any of these products?`;
+  response += `\n\n💡 **Next Steps:** Would you like to add any of these to your cart, or need more information about specific features?`;
   return response;
 }
 

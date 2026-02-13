@@ -1,5 +1,6 @@
 // server/rag/adaptiveRouter.js - Routes queries to appropriate retrieval system
 const { semanticSearch } = require("./vectorStore");
+const { analyzeQueryForCategories } = require("./specificationMatcher");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const User = require("../models/User");
@@ -14,14 +15,35 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
 
   try {
     switch (intent) {
-      case "product_semantic":
-        // Semantic similarity search in vector DB
-        const embedding = await embedQuery(query);
-        const semanticResults = await semanticSearch(embedding, 5);
+
+      case "product_semantic": {
+        // Specification-based semantic search with strict category filtering
+        const allProducts = await Product.find().lean();
+        const queryLower = query.toLowerCase();
+        let bestCategory = null;
+        // Force category to 'Smartphones' if query contains 'phone' or 'smartphone'
+        if (queryLower.includes('phone') || queryLower.includes('smartphone')) {
+          bestCategory = 'Smartphones';
+        } else {
+          const categoryScores = analyzeQueryForCategories(query);
+          if (categoryScores && Object.keys(categoryScores).length > 0) {
+            bestCategory = Object.entries(categoryScores)
+              .sort((a, b) => b[1].confidence - a[1].confidence)[0][0];
+          }
+        }
+        let filteredProducts = allProducts;
+        if (bestCategory) {
+          filteredProducts = allProducts.filter(p => p.category === bestCategory);
+        }
+        // Score products based on relevance to query
+        const scoredProducts = scoreProductsByQuery(filteredProducts, query);
+        const topProducts = scoredProducts.slice(0, 10);
+
         context.route = "product_vector_db";
-        context.data.products = semanticResults;
-        context.data.retrievalType = "semantic";
+        context.data.products = topProducts;
+        context.data.retrievalType = "semantic_with_specs";
         break;
+      }
 
       case "product_exact":
         // Exact match in MongoDB
@@ -153,14 +175,113 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
  */
 async function embedQuery(text) {
   try {
-    const { pipeline } = require("@xenova/transformers");
-    const model = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    const output = await model(text, { pooling: "mean", normalize: true });
-    return Array.from(output.data);
+    // Try to load transformer library if available
+    let transformersAvailable = false;
+    try {
+      require.resolve("@xenova/transformers");
+      transformersAvailable = true;
+    } catch (e) {
+      // Library not installed - continue with fallback
+    }
+    
+    if (transformersAvailable) {
+      const { pipeline } = require("@xenova/transformers");
+      const model = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+      const output = await model(text, { pooling: "mean", normalize: true });
+      return Array.from(output.data);
+    } else {
+      // Return fallback empty embedding - specification matching will handle scoring
+      return new Array(384).fill(0);
+    }
   } catch (error) {
     console.error("Embedding error:", error.message);
     return new Array(384).fill(0); // Fallback empty embedding
   }
+}
+
+/**
+ * Score products based on query relevance
+ * Combines keyword matching, category detection, and specification matching
+ */
+function scoreProductsByQuery(products, query) {
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/);
+
+  return products.map(product => {
+    let score = (product.rating || 0) * 2; // Base score on rating
+    let matchedFields = [];
+
+    // Check for exact keyword matches in product title
+    if (product.title && product.title.toLowerCase().includes(queryWords[0])) {
+      score += 10;
+      matchedFields.push('title');
+    }
+
+    // Check for category-relevant queries
+    const categoryKeywords = {
+      'Laptops': ['laptop', 'computer', 'notebook', 'macbook', 'gaming', 'processor', 'ram', 'battery', 'display', 'gpu', 'refresh'],
+      'Smartphones': ['phone', 'smartphone', 'mobile', 'camera', 'battery', '5g', 'display', 'amoled', 'oled'],
+      'Smart TVs': ['tv', 'television', 'screen', 'gaming', 'display', '4k', 'hdmi', 'qled', 'oled'],
+      'Accessories': ['charger', 'earbuds', 'headphones', 'speaker', 'cable', 'mouse', 'keyboard', 'webcam', 'power', 'wireless'],
+      'Wearables': ['watch', 'smartwatch', 'fitness', 'band', 'tracker', 'wearable', 'health', 'gps']
+    };
+
+    const categoryMatches = categoryKeywords[product.category] || [];
+    let categoryScore = 0;
+    for (const word of queryWords) {
+      if (categoryMatches.includes(word)) {
+        categoryScore += 1;
+        if (!matchedFields.includes('category')) {
+          matchedFields.push('category');
+        }
+      }
+    }
+    score += categoryScore * 3;
+
+    // Check for specification matches
+    if (product.specifications) {
+      const specs = product.specifications;
+      const specString = JSON.stringify(specs).toLowerCase();
+
+      // Count keyword matches in specs
+      let specMatches = 0;
+      for (const word of queryWords) {
+        if (word.length > 2 && specString.includes(word)) {
+          specMatches++;
+        }
+      }
+      score += specMatches * 4;
+
+      // Bonus for specific feature matches
+      if((query.includes('gaming') || query.includes('game')) && specs.best_for === 'Gaming') {
+        score += 8;
+      }
+      if ((query.includes('battery') || query.includes('hrs')) && specs.battery_life) {
+        score += 6;
+      }
+      if (query.includes('display') && specs.display) {
+        score += 5;
+      }
+      if ((query.includes('processor') || query.includes('cpu')) && specs.processor) {
+        score += 5;
+      }
+      if ((query.includes('camera') || query.includes('mp')) && (specs.rear_camera || specs.front_camera)) {
+        score += 5;
+      }
+      if (query.includes('lightweight') && specs.weight && parseFloat(specs.weight) < 1.5) {
+        score += 6;
+      }
+      if (query.includes('long battery') && specs.battery_life && (specs.battery_life.includes('18') || specs.battery_life.includes('20'))) {
+        score += 7;
+      }
+
+      if (specMatches > 0 && !matchedFields.includes('specs')) {
+        matchedFields.push('specs');
+      }
+    }
+
+    return { ...product, finalScore: score, matchedFields };
+  }).sort((a, b) => b.finalScore - a.finalScore);
 }
 
 /**

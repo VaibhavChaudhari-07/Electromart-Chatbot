@@ -1,10 +1,12 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 /* Layout & Common components */
 import Layout from "./components/Layout";
 import ChatbotWidget from "./components/ChatbotWidget";
+
 import Ai from "./pages/Ai";
+const ProductDetails = React.lazy(() => import("./pages/ProductDetails"));
 
 /* Pages - Public / User */
 import Home from "./pages/Home";
@@ -58,6 +60,14 @@ export default function App() {
             <Route path="/admin/signup" element={<AdminSignup />} />
             <Route path="/" element={<Home />} />
             <Route path="/products" element={<Products />} />
+            <Route
+              path="/product/:id"
+              element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <ProductDetails />
+                </Suspense>
+              }
+            />
             <Route path="/ai" element={<Ai />} />
 
             {/* User-only pages (protected) */}

@@ -70,6 +70,16 @@ export default function ProductCard({ item, onDelete, onEdit }) {
         <div className="absolute top-3 left-3 bg-primary text-white px-3 py-1 rounded-lg text-xs font-semibold">
           {item.category || 'Featured'}
         </div>
+        {/* View Details Button (User only) */}
+        {!admin && (
+          <button
+            className="absolute top-3 right-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded-full font-semibold text-xs shadow-lg z-10"
+            style={{ marginTop: discount > 0 ? '2.5rem' : '0' }}
+            onClick={() => navigate(`/product/${item._id}`, { state: { product: item } })}
+          >
+            View Details
+          </button>
+        )}
       </div>
 
       <div className="p-4 flex flex-col flex-1">

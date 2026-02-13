@@ -1,8 +1,24 @@
 // server/rag/vectorStore.js - Vector Database for semantic search
 const mongoose = require("mongoose");
-const similarity = require("cosine-similarity");
 
 const Schema = mongoose.Schema;
+
+// Simple cosine similarity implementation
+function cosineSimilarity(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  normA = Math.sqrt(normA);
+  normB = Math.sqrt(normB);
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (normA * normB);
+}
 
 // Product Embeddings Collection
 const EmbeddingSchema = new Schema(
@@ -81,7 +97,7 @@ async function semanticSearch(queryEmbedding, k = 5) {
       .map((doc) => {
         try {
           const score = doc.embedding
-            ? similarity(queryEmbedding, doc.embedding)
+            ? cosineSimilarity(queryEmbedding, doc.embedding)
             : 0;
           return { ...doc, score };
         } catch (err) {
@@ -116,7 +132,7 @@ async function semanticOrderSearch(queryEmbedding, userId, k = 3) {
     const scored = userOrders
       .map((doc) => ({
         ...doc,
-        score: doc.embedding ? similarity(queryEmbedding, doc.embedding) : 0,
+        score: doc.embedding ? cosineSimilarity(queryEmbedding, doc.embedding) : 0,
       }))
       .filter((doc) => !isNaN(doc.score));
 
@@ -182,6 +198,11 @@ async function getEmbeddingStats() {
 }
 
 module.exports = {
+  // Models (exported for other modules that need direct model access)
+  ProductEmbeddingModel,
+  OrderEmbeddingModel,
+
+  // Functions
   upsertEmbedding,
   semanticSearch,
   semanticOrderSearch,
