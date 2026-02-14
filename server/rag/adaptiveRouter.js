@@ -46,61 +46,88 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
       }
 
       case "product_exact":
-        // Exact match in MongoDB
-        const exactResults = await Product.find(
-          { $text: { $search: query } },
-          { score: { $meta: "textScore" } }
-        )
-          .sort({ score: { $meta: "textScore" } })
-          .limit(5);
+        // Exact match - try product ID from intent first, then fuzzy search
+        let exactProduct = null;
+        
+        // If intent provided product ID, fetch directly
+        if (intentObj.productId) {
+          exactProduct = await Product.findById(intentObj.productId);
+        }
+        
+        // If not found by ID, do flexible regex search on title/name
+        if (!exactProduct) {
+          const searchTerms = query
+            .split(/\s+/)
+            .filter(t => t.length > 2)
+            .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+          
+          exactProduct = await Product.findOne({
+            $or: [
+              { title: { $regex: searchTerms.join("|"), $options: "i" } },
+              { name: { $regex: searchTerms.join("|"), $options: "i" } },
+            ]
+          });
+        }
+        
         context.route = "mongodb_exact";
-        context.data.products = exactResults;
+        context.data.products = exactProduct ? [exactProduct] : [];
         context.data.retrievalType = "exact";
         break;
 
       case "product_comparison":
-        // Extract product names and compare
-        let productNames = await extractProductNames(query);
+        // If intent detection already matched products, use them
+        let comparisonProducts = [];
         
-        // If we still don't have 2+ products, try semantic search on the query
-        if (productNames.length < 2) {
-          try {
-            const embedding = await embedQuery(query);
-            const semanticResults = await semanticSearch(embedding, 6);
-            productNames = semanticResults.map(p => p.title);
-          } catch (e) {
-            console.error("Semantic fallback failed:", e.message);
+        if (intentObj.productIds && intentObj.productIds.length >= 2) {
+          // Use matched products from intent detection
+          comparisonProducts = await Product.find({
+            _id: { $in: intentObj.productIds }
+          }).lean();
+        } else {
+          // Fallback: Extract product names from query
+          let productNames = await extractProductNames(query);
+          
+          // If we still don't have 2+ products, try semantic search on the query
+          if (productNames.length < 2) {
+            try {
+              const embedding = await embedQuery(query);
+              const semanticResults = await semanticSearch(embedding, 6);
+              productNames = semanticResults.map(p => p.title);
+            } catch (e) {
+              console.error("Semantic fallback failed:", e.message);
+            }
+          }
+
+          // Now try to find products matching extracted names
+          if (productNames.length >= 2) {
+            comparisonProducts = await Product.find({
+              title: {
+                $regex: productNames
+                  .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+                  .join("|"),
+                $options: "i"
+              }
+            }).limit(5).lean();
           }
         }
 
-        // Now try to find products matching extracted names
-        if (productNames.length >= 2) {
-          const comparisonProducts = await Product.find({
-            title: {
-              $regex: productNames
-                .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-                .join("|"),
-              $options: "i"
-            }
-          }).limit(5);
-
-          if (comparisonProducts.length >= 2) {
-            context.route = "mongodb_comparison";
-            context.data.products = comparisonProducts;
-            context.data.retrievalType = "comparison";
-          } else {
-            // Still not enough products found - use semantic search for best match
+        if (comparisonProducts && comparisonProducts.length >= 2) {
+          context.route = "mongodb_comparison";
+          context.data.products = comparisonProducts.slice(0, 5); // Max 5 products for comparison
+          context.data.retrievalType = "comparison";
+        } else {
+          // Not enough products found - try semantic fallback
+          try {
             const embedding = await embedQuery(query);
             const fallbackResults = await semanticSearch(embedding, 5);
             context.route = "product_vector_db";
             context.data.products = fallbackResults;
             context.data.retrievalType = "semantic";
             context.data.message = "Here are similar products you might want to compare:";
+          } catch (e) {
+            context.route = "llm_only";
+            context.data.message = "I need product names to compare. Could you specify which products?";
           }
-        } else {
-          // Ask user for clarification
-          context.route = "llm_only";
-          context.data.message = "I need product names to compare. Could you specify which products?";
         }
         break;
 

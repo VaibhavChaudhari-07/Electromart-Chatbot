@@ -1,4 +1,6 @@
 // server/rag/intentDetector.js - Adaptive RAG Intent Detection
+const Product = require("../models/Product");
+
 const INTENT_RULES = [
   // Order-related intents (must be checked BEFORE product intents due to keyword overlap)
   {
@@ -51,6 +53,26 @@ const INTENT_RULES = [
 async function detectIntent(query) {
   const q = query.toLowerCase().trim();
 
+  // **INTENT 3: Product Comparison** - Check if query is asking to compare products
+  try {
+    const comparisonMatch = await detectComparisonIntent(q);
+    if (comparisonMatch && comparisonMatch.productIds && comparisonMatch.productIds.length >= 2) {
+      return comparisonMatch;
+    }
+  } catch (err) {
+    console.error("Error detecting comparison intent:", err.message);
+  }
+
+  // **INTENT 2: Product Exact** - Check if query references a specific product
+  try {
+    const exactMatch = await detectExactProductIntent(q);
+    if (exactMatch) {
+      return exactMatch;
+    }
+  } catch (err) {
+    console.error("Error detecting exact product intent:", err.message);
+  }
+
   // Product-related keywords - check first to avoid false matches on "order_support" etc
   const productKeywords = ["laptop", "phone", "smartphone", "tv", "television", "earbuds", "headphones", "watch", "smartwatch", "charger", "mouse", "keyboard", "speaker", "monitor", "accessory", "wearable", "device", "gadget"];
   const isProductQuery = productKeywords.some(kw => q.includes(kw));
@@ -80,4 +102,301 @@ async function detectIntent(query) {
   return { intent: "general", confidence: 0.3, reason: "No specific intent matched" };
 }
 
-module.exports = { detectIntent };
+// Cache for product titles to avoid repeated DB queries
+let productTitleCache = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 300000; // 5 minutes
+
+/**
+ * Fuzzy string matching - checks if query contains product name with tolerance
+ */
+function fuzzyMatch(query, productTitle, threshold = 0.7) {
+  const q = query.toLowerCase();
+  const p = productTitle.toLowerCase();
+  
+  if (q.includes(p) || p.includes(q)) return true; // Exact substring match
+  
+  // Check if all/most words in product title appear in query (order-independent)
+  const titleWords = p.split(/\s+/).filter(w => w.length > 2);
+  if (titleWords.length === 0) return false;
+  
+  const queryWords = q.split(/\s+/);
+  const matchedWords = titleWords.filter(word => 
+    queryWords.some(qw => qw.includes(word) || word.includes(qw))
+  );
+  
+  return matchedWords.length / titleWords.length >= threshold;
+}
+
+/**
+ * Check if query contains product SKU/number pattern at end
+ */
+function extractSkuNumber(text) {
+  const match = text.match(/(\d+)\s*$/);
+  return match ? parseInt(match[1]) : null;
+}
+
+/**
+ * Load cached product titles from DB
+ */
+async function getProductTitles() {
+  const now = Date.now();
+  
+  // Return cache if fresh
+  if (productTitleCache && (now - cacheTimestamp) < CACHE_DURATION) {
+    return productTitleCache;
+  }
+  
+  try {
+    const products = await Product.find().select("_id title name brand").lean();
+    productTitleCache = products.map(p => ({
+      id: p._id,
+      title: p.title || p.name,
+      name: p.name,
+      brand: p.brand,
+      fullText: `${p.brand || ''} ${p.title || p.name || ''}`.toLowerCase(),
+    }));
+    cacheTimestamp = now;
+    return productTitleCache;
+  } catch (err) {
+    console.error("Error loading product titles:", err.message);
+    return [];
+  }
+}
+
+/**
+ * Detect if query is asking for an exact product
+ */
+async function detectExactProductIntent(query) {
+  const productTitles = await getProductTitles();
+  
+  // 1. Direct exact title match
+  for (const prod of productTitles) {
+    if (fuzzyMatch(query, prod.title, 0.85)) {
+      return {
+        intent: "product_exact",
+        confidence: 0.95,
+        reason: "Exact product title match: " + prod.title,
+        productId: prod.id,
+        productTitle: prod.title,
+      };
+    }
+  }
+  
+  // 2. Brand + model match (e.g., "Dell Legion 5 1")
+  const brandModelMatch = productTitles.find(prod => 
+    fuzzyMatch(query, `${prod.brand} ${prod.title}`, 0.80)
+  );
+  if (brandModelMatch) {
+    return {
+      intent: "product_exact",
+      confidence: 0.92,
+      reason: "Brand + model match: " + brandModelMatch.title,
+      productId: brandModelMatch.id,
+      productTitle: brandModelMatch.title,
+    };
+  }
+  
+  // 3. Partial match without SKU (e.g., "Yoga Slim 7" matching "Apple Yoga Slim 7 2")
+  const skuNum = extractSkuNumber(query);
+  const withoutSku = skuNum ? query.replace(/\s+\d+\s*$/, '') : query;
+  
+  const partialMatches = productTitles.filter(prod => 
+    fuzzyMatch(withoutSku, prod.title, 0.75)
+  ).slice(0, 5);
+  
+  if (partialMatches.length === 1) {
+    return {
+      intent: "product_exact",
+      confidence: 0.88,
+      reason: "Partial product match: " + partialMatches[0].title,
+      productId: partialMatches[0].id,
+      productTitle: partialMatches[0].title,
+    };
+  } else if (partialMatches.length > 1 && skuNum) {
+    // Multiple matches + SKU narrows it down (use SKU as index)
+    const idx = Math.min(skuNum - 1, partialMatches.length - 1);
+    const selected = partialMatches[idx];
+    if (selected) {
+      return {
+        intent: "product_exact",
+        confidence: 0.85,
+        reason: "SKU-based match: " + selected.title,
+        productId: selected.id,
+        productTitle: selected.title,
+      };
+    }
+  }
+  
+  // 4. Commerce query for exact product (buy, price, stock, warranty, details, specs, info)
+  const commerceKeywords = ["buy", "price", "cost", "offer", "emi", "stock", "warranty", "details", "specs", "info", "show", "get", "display", "provide"];
+  const isCommerce = commerceKeywords.some(kw => query.includes(kw));
+  
+  if (isCommerce) {
+    for (const prod of productTitles) {
+      if (fuzzyMatch(query, prod.title, 0.75)) {
+        return {
+          intent: "product_exact",
+          confidence: 0.87,
+          reason: "Commerce query for product: " + prod.title,
+          productId: prod.id,
+          productTitle: prod.title,
+        };
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract product names from comparison queries
+ * Handles: "Product A vs Product B", "Compare Product A and Product B", etc.
+ */
+function extractProductNames(query) {
+  const q = query.toLowerCase();
+  
+  // Remove comparison keywords
+  const cleanQuery = q
+    .replace(/\b(compare|comparison|vs|versus|than|between|against)\b/g, '|')
+    .replace(/\b(and|or|,)\b/g, '|');
+  
+  // Split by delimiters and filter empty strings
+  const parts = cleanQuery
+    .split(/\|/)
+    .map(s => s.trim())
+    .filter(s => s.length > 2 && s.length < 100);
+  
+  // Remove common non-product words
+  const nonProductWords = ['phones', 'laptops', 'tvs', 'watches', 'earbuds', 'headphones', 'speakers', 'tablets', 'cameras', 'which', 'better', 'best', 'good', 'bad', 'for', 'with', 'comparison', 'compare'];
+  
+  return parts.filter(part => {
+    const word = part.split(/\s+/)[0];
+    return !nonProductWords.includes(word);
+  });
+}
+
+/**
+ * Detect if query is asking for comparison of products
+ */
+async function detectComparisonIntent(query) {
+  const q = query.toLowerCase();
+  
+  // Check for strong comparison keywords
+  const strongComparisonKeywords = ['compare', 'comparison', 'vs', 'versus', 'between'];
+  const hasStrongComparison = strongComparisonKeywords.some(kw => q.includes(kw));
+  
+  // Check for weak comparison keywords
+  const weakComparisonKeywords = ['which', 'better', 'difference', 'should i buy', 'vs ', 'diff', 'prefer', 'advantage'];
+  const hasWeakComparison = weakComparisonKeywords.some(kw => q.includes(kw));
+  
+  // Need at least one comparison keyword to consider this a comparison
+  if (!hasStrongComparison && !hasWeakComparison) {
+    return null;
+  }
+  
+  // Extract potential product names
+  const productNames = extractProductNames(query);
+  
+  // For weak comparison keywords, we need at least 2 product names
+  if (!hasStrongComparison && productNames.length < 2) {
+    return null;
+  }
+  
+  // For strong comparison keywords, try harder to find products
+  if (hasStrongComparison && productNames.length === 0) {
+    return null;
+  }
+  
+  // Get cached product titles
+  const productTitles = await getProductTitles();
+  
+  // If no product names extracted, try brand-based extraction for implicit comparisons
+  let candidateProducts = [];
+  
+  if (productNames.length === 0 && (hasWeakComparison || hasStrongComparison)) {
+    // Try to find brand names in query for implicit comparisons
+    const brands = ['apple', 'samsung', 'dell', 'hp', 'lenovo', 'asus', 'sony', 'bose', 'oneplus', 'xiaomi', 'realme', 'iphone', 'ipad', 'macbook', 'galaxy', 'pixel'];
+    const foundBrands = brands.filter(b => q.includes(b));
+    
+    if (foundBrands.length >= 2) {
+      // Find products with these brands
+      for (const brand of foundBrands) {
+        const brandProducts = productTitles.filter(p => 
+          (p.brand && p.brand.toLowerCase().includes(brand)) ||
+          (p.title && p.title.toLowerCase().includes(brand))
+        ).slice(0, 1);
+        
+        if (brandProducts.length > 0) {
+          candidateProducts.push(brandProducts[0]);
+        }
+      }
+    }
+  } else {
+    // Match extracted product names
+    const matchedProducts = [];
+    
+    for (const name of productNames) {
+      // 1. Exact/fuzzy match on product title
+      const exactMatch = productTitles.find(prod => 
+        fuzzyMatch(name, prod.title, 0.70)
+      );
+      
+      if (exactMatch) {
+        matchedProducts.push(exactMatch);
+        continue;
+      }
+      
+      // 2. Try partial match on brand
+      const brandMatches = productTitles.filter(prod => 
+        prod.brand && fuzzyMatch(name, prod.brand, 0.75)
+      ).slice(0, 1);
+      
+      if (brandMatches.length > 0) {
+        matchedProducts.push(brandMatches[0]);
+        continue;
+      }
+      
+      // 3. Fuzzy match with lower threshold
+      const fuzzyMatches = productTitles.filter(prod => 
+        fuzzyMatch(name, prod.title, 0.55)
+      ).slice(0, 1);
+      
+      if (fuzzyMatches.length > 0) {
+        matchedProducts.push(fuzzyMatches[0]);
+      }
+    }
+    
+    candidateProducts = matchedProducts;
+  }
+  
+  // Return intent only if we found 2+ unique products
+  const uniqueProducts = Array.from(new Map(
+    candidateProducts.map(p => [p.id.toString(), p])
+  ).values());
+  
+  if (uniqueProducts.length >= 2) {
+    return {
+      intent: 'product_comparison',
+      confidence: 0.92,
+      reason: `Comparison of ${uniqueProducts.length} products detected`,
+      productIds: uniqueProducts.map(p => p.id),
+      productTitles: uniqueProducts.map(p => p.title),
+      matchedProducts: uniqueProducts,
+    };
+  }
+  
+  // If we have comparison intent but couldn't find enough products
+  if (hasStrongComparison) {
+    return {
+      intent: 'product_comparison',
+      confidence: 0.75,
+      reason: 'Comparison intent detected but unable to find multiple products',
+      productNames: productNames,
+    };
+  }
+  
+  return null;
+}
+
+module.exports = { detectIntent, detectExactProductIntent, detectComparisonIntent };

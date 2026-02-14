@@ -113,85 +113,203 @@ function generateProductExactResponse(query, context) {
     return `I couldn't find an exact match for "${query}". Would you like me to suggest similar products instead?`;
   }
 
-  let response = `I found the product you're looking for: **${products[0].title}**\n\n`;
-
   const p = products[0];
-  response += `💰 **Price:** ₹${p.price}\n`;
-  response += `${p.rating ? `⭐ **Rating:** ${p.rating}/5\n` : ""}`;
-  response += `📝 **Details:** ${p.description}\n`;
+  
+  let response = `🎯 **Perfect Match Found: ${p.title}**\n\n`;
 
+  response += `💰 **Price:** ₹${p.price.toLocaleString()}\n`;
+  if (p.rating) {
+    response += `⭐ **Rating:** ${p.rating}/5`;
+    if (p.reviews) response += ` (${p.reviews} reviews)`;
+    response += `\n`;
+  }
+
+  // Display stock status prominently
+  if (p.stock !== undefined) {
+    response += `${p.stock > 0 ? "✅ **In Stock:**" : "❌ **Out of Stock:**"} ${p.stock > 0 ? `${p.stock} available` : "Currently unavailable"}\n`;
+  }
+
+  // Display specifications in a clean format
+  if (p.specifications) {
+    response += `\n⚙️ **Key Specifications:**\n`;
+    
+    // Handle different spec formats (object, array, or string)
+    if (typeof p.specifications === 'object') {
+      if (Array.isArray(p.specifications)) {
+        // Array format
+        p.specifications.slice(0, 5).forEach((spec) => {
+          if (typeof spec === 'string') {
+            response += `• ${spec}\n`;
+          } else if (typeof spec === 'object' && spec.name && spec.value) {
+            response += `• **${spec.name}:** ${spec.value}\n`;
+          }
+        });
+      } else {
+        // Object format (key-value pairs)
+        Object.entries(p.specifications).slice(0, 5).forEach(([key, value]) => {
+          const displayKey = key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+          response += `• **${displayKey}:** ${value}\n`;
+        });
+      }
+    } else if (typeof p.specifications === 'string' && p.specifications.trim()) {
+      // String format (raw text)
+      response += p.specifications.split('\n').slice(0, 5).join('\n') + '\n';
+    }
+  }
+
+  // Display key features
   if (p.features && p.features.length > 0) {
     response += `\n✨ **Key Features:**\n`;
-    p.features.slice(0, 5).forEach((f) => {
+    p.features.slice(0, 4).forEach((f) => {
       response += `• ${f}\n`;
     });
   }
 
-  if (p.stock) {
-    response += `\n📦 **Stock:** ${p.stock > 0 ? `${p.stock} available` : "Out of stock"}\n`;
+  // Description/Summary
+  if (p.description) {
+    response += `\n📝 **About this product:**\n${p.description}\n`;
   }
 
-  response += `\n🛒 Ready to add to cart?`;
+  response += `\n🛍️ **View full details and add to cart above!** ⬆️`;
   return response;
 }
 
 /**
- * Product Comparison Response
+ * Product Comparison Response - Side-by-Side Comparison Table
  */
 function generateComparisonResponse(query, context) {
   let products = context.items || [];
 
-  // If we have fewer than 2 products but have items from semantic search
-  if (products.length === 1) {
-    // Try to find similar products to compare with
-    let response = `\n⚖️ **Product Comparison - ${products[0].title}**\n\n`;
-    response += `I found: **${products[0].title}**\n`;
-    response += `💰 Price: ₹${products[0].price}\n`;
-    response += `⭐ Rating: ${products[0].rating || 'N/A'}/5\n\n`;
-    response += `Would you like me to compare this with similar products in this category? Just let me know! 🔍\n`;
-    return response;
-  }
-
+  // If we have fewer than 2 products
   if (products.length < 2) {
-    // Try semantic search as fallback
+    if (products.length === 1) {
+      let response = `\n⚖️ **Comparison - ${products[0].title}**\n\n`;
+      response += `I found only one product: **${products[0].title}**\n`;
+      response += `💰 Price: ₹${products[0].price.toLocaleString()}\n`;
+      response += `⭐ Rating: ${products[0].rating || 'N/A'}/5\n\n`;
+      response += `Would you like me to find similar products to compare with this? Just let me know other product names! 🔍\n`;
+      return response;
+    }
+    
     if (context.message) {
       return context.message;
     }
     return `I need at least 2 products to compare. Could you specify which products you'd like to compare? For example: "Compare iPhone 15 and Samsung S24" 📱`;
   }
 
-  let response = `### **⚖️ Product Comparison**\n\n`;
+  let response = `## ⚖️ **Product Comparison**\n\n`;
+  
+  // Show heading with product count
+  response += `Comparing **${products.length} products**:\n\n`;
 
   // Create comparison table with up to 5 products
   const comparableProducts = products.slice(0, 5);
-  response += `| Feature | ${comparableProducts.map((p) => p.title).join(" | ")} |\n`;
-  response += `|---------|${comparableProducts.map(() => "---|").join("")}\n`;
-  response += `| **Price** | ${comparableProducts.map((p) => `₹${p.price}`).join(" | ")} |\n`;
-  response += `| **Rating** | ${comparableProducts.map((p) => (p.rating ? `${p.rating}/5 ⭐` : "N/A")).join(" | ")} |\n`;
-  response += `| **Stock** | ${comparableProducts.map((p) => (p.stock > 0 ? "✓ In Stock" : "✗ Out")).join(" | ")} |\n`;
+  
+  // Define features to compare (in priority order)
+  const features = [
+    'Price',
+    'Rating',
+    'Stock',
+    'Brand',
+    'Category',
+  ];
 
-  if (comparableProducts.every((p) => p.features && p.features.length > 0)) {
-    response += `| **Top Features** | ${comparableProducts
-      .map((p) => p.features.slice(0, 2).join(", "))
-      .join(" | ")} |\n`;
+  // Add specification columns if available
+  const specKeys = new Set();
+  comparableProducts.forEach(p => {
+    if (p.specifications && typeof p.specifications === 'object') {
+      Object.keys(p.specifications).forEach(key => specKeys.add(key));
+    }
+  });
+  
+  // Add up to 5 spec fields to comparison
+  const topSpecs = Array.from(specKeys).slice(0, 5);
+  
+  // Build table header
+  response += `| Feature | ${comparableProducts.map(p => p.title.substring(0, 20)).join(" | ")} |\n`;
+  response += `|---------|${comparableProducts.map(() => "---|").join("")}\n`;
+
+  // Price row
+  response += `| **Price** | ${comparableProducts.map(p => `₹${p.price.toLocaleString()}`).join(" | ")} |\n`;
+
+  // Rating row
+  response += `| **Rating** | ${comparableProducts.map(p => {
+    if (p.rating) return `${p.rating}/5 ⭐`;
+    if (p.ratingCount) return `${p.ratingCount} reviews ⭐`;
+    return 'N/A';
+  }).join(" | ")} |\n`;
+
+  // Stock status row
+  response += `| **Stock** | ${comparableProducts.map(p => {
+    if (p.stock > 0) return `✅ ${p.stock} available`;
+    return '❌ Out of Stock';
+  }).join(" | ")} |\n`;
+
+  // Brand row
+  if (comparableProducts.some(p => p.brand)) {
+    response += `| **Brand** | ${comparableProducts.map(p => p.brand || '-').join(" | ")} |\n`;
   }
 
-  response += `\n💡 **My Recommendation:** `;
+  // Category row
+  if (comparableProducts.some(p => p.category)) {
+    response += `| **Category** | ${comparableProducts.map(p => p.category || '-').join(" | ")} |\n`;
+  }
+
+  // Add specification rows
+  topSpecs.forEach(specKey => {
+    const displayKey = specKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    response += `| **${displayKey}** | ${comparableProducts.map(p => {
+      if (p.specifications && p.specifications[specKey]) {
+        const val = p.specifications[specKey];
+        return typeof val === 'object' ? JSON.stringify(val).substring(0, 15) : String(val).substring(0, 20);
+      }
+      return '-';
+    }).join(" | ")} |\n`;
+  });
+
+  // Add features if available
+  if (comparableProducts.some(p => p.features && p.features.length > 0)) {
+    response += `| **Top Feature** | ${comparableProducts.map(p => {
+      if (p.features && p.features.length > 0) return p.features[0];
+      return '-';
+    }).join(" | ")} |\n`;
+  }
+
+  // Analysis and recommendation
+  response += `\n### 💡 **Analysis:**\n\n`;
+
+  // Best by rating
   const bestByRating = comparableProducts.reduce((prev, current) =>
     (current.rating || 0) > (prev.rating || 0) ? current : prev
   );
+  
+  // Best by price
   const bestByPrice = comparableProducts.reduce((prev, current) =>
     (current.price || 0) < (prev.price || 0) ? current : prev
   );
 
-  if (bestByRating.rating >= 4.5) {
-    response += `Based on ratings, **${bestByRating.title}** is the best choice. `;
+  if (bestByRating.rating && bestByRating.rating >= 4.5) {
+    response += `⭐ **Best Rated:** ${bestByRating.title} (${bestByRating.rating}/5)\n`;
   }
-  if (bestByPrice !== bestByRating) {
-    response += `For best value, consider **${bestByPrice.title}**.`;
+  
+  if (bestByPrice) {
+    response += `💰 **Most Affordable:** ${bestByPrice.title} (₹${bestByPrice.price.toLocaleString()})\n`;
   }
 
-  response += `\n\n🛒 Ready to add any to your cart?`;
+  // Value for money analysis
+  if (comparableProducts.length >= 2) {
+    const valueScores = comparableProducts.map(p => {
+      const ratingWeight = (p.rating || 0) * 100;
+      const priceWeight = Math.max(0, 10000 - p.price) / 100;
+      return { product: p, score: ratingWeight + priceWeight };
+    });
+    
+    const bestValue = valueScores.reduce((a, b) => a.score > b.score ? a : b);
+    response += `🏆 **Best Value:** ${bestValue.product.title}\n`;
+  }
+
+  response += `\n🛒 **View product details and add to cart to proceed!** ⬆️`;
+  
   return response;
 }
 
