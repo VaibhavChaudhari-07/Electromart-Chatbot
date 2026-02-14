@@ -53,17 +53,33 @@ const INTENT_RULES = [
 async function detectIntent(query) {
   const q = query.toLowerCase().trim();
 
+  // Check for comparison keywords FIRST - if present, prioritize comparison intent
+  const strongComparisonKeywords = ['compare', 'comparison', 'vs', 'versus', 'vs '];
+  const hasComparisonKeyword = strongComparisonKeywords.some(kw => q.includes(kw));
+
   // **INTENT 3: Product Comparison** - Check if query is asking to compare products
-  try {
-    const comparisonMatch = await detectComparisonIntent(q);
-    if (comparisonMatch && comparisonMatch.productIds && comparisonMatch.productIds.length >= 2) {
-      return comparisonMatch;
+  // If query has comparison keywords, ALWAYS try comparison intent first (don't fall back to exact)
+  if (hasComparisonKeyword) {
+    try {
+      const comparisonMatch = await detectComparisonIntent(q);
+      if (comparisonMatch) {
+        return comparisonMatch;
+      }
+    } catch (err) {
+      console.error("Error detecting comparison intent:", err.message);
     }
-  } catch (err) {
-    console.error("Error detecting comparison intent:", err.message);
+    // If comparison intent is detected but can't find products, still return as comparison
+    return {
+      intent: 'product_comparison',
+      confidence: 0.90,
+      reason: 'Comparison keyword detected but unable to find matching products',
+      productIds: [],
+      matchedProducts: [],
+      deviceCategory: null
+    };
   }
 
-  // **INTENT 2: Product Exact** - Check if query references a specific product
+  // **INTENT 2: Product Exact** - Only check exact if NO comparison keywords
   try {
     const exactMatch = await detectExactProductIntent(q);
     if (exactMatch) {
@@ -148,12 +164,13 @@ async function getProductTitles() {
   }
   
   try {
-    const products = await Product.find().select("_id title name brand").lean();
+    const products = await Product.find().select("_id title name brand category").lean();
     productTitleCache = products.map(p => ({
       id: p._id,
       title: p.title || p.name,
       name: p.name,
       brand: p.brand,
+      category: p.category,
       fullText: `${p.brand || ''} ${p.title || p.name || ''}`.toLowerCase(),
     }));
     cacheTimestamp = now;
@@ -277,6 +294,29 @@ function extractProductNames(query) {
 }
 
 /**
+ * Extract device category from query (phone, laptop, tv, etc.)
+ */
+function extractDeviceCategory(query) {
+  const q = query.toLowerCase();
+  
+  const categoryMap = {
+    'Smartphones': ['phone', 'smartphone', 'mobile', 'iphone', 'android', 'galaxy', 's24', 's23', 'pixel', 'oneplus', 'realme'],
+    'Laptops': ['laptop', 'notebook', 'macbook', 'xps', 'legion', 'envy', 'thinkpad', 'omen', 'rog', 'gaming laptop'],
+    'Smart TVs': ['tv', 'smart tv', 'television', 'display', '4k', '8k', 'oled'],
+    'Wearables': ['watch', 'smartwatch', 'band', 'tracker', 'airpods', 'earbuds', 'headphones'],
+    'Accessories': ['charger', 'cable', 'adapter', 'case', 'screen protector']
+  };
+  
+  for (const [category, keywords] of Object.entries(categoryMap)) {
+    if (keywords.some(kw => q.includes(kw))) {
+      return category;
+    }
+  }
+  
+  return null;
+}
+
+/**
  * Detect if query is asking for comparison of products
  */
 async function detectComparisonIntent(query) {
@@ -308,6 +348,9 @@ async function detectComparisonIntent(query) {
     return null;
   }
   
+  // Detect device category from query (e.g., "phone", "laptop", "tv")
+  const deviceCategory = extractDeviceCategory(query);
+  
   // Get cached product titles
   const productTitles = await getProductTitles();
   
@@ -320,12 +363,17 @@ async function detectComparisonIntent(query) {
     const foundBrands = brands.filter(b => q.includes(b));
     
     if (foundBrands.length >= 2) {
-      // Find products with these brands
+      // Find products with these brands, filtered by category if detected
       for (const brand of foundBrands) {
-        const brandProducts = productTitles.filter(p => 
+        let brandProducts = productTitles.filter(p => 
           (p.brand && p.brand.toLowerCase().includes(brand)) ||
           (p.title && p.title.toLowerCase().includes(brand))
-        ).slice(0, 1);
+        );
+        
+        // Filter by category if detected
+        if (deviceCategory) {
+          brandProducts = brandProducts.filter(p => p.category === deviceCategory);
+        }
         
         if (brandProducts.length > 0) {
           candidateProducts.push(brandProducts[0]);
@@ -337,19 +385,40 @@ async function detectComparisonIntent(query) {
     const matchedProducts = [];
     
     for (const name of productNames) {
-      // 1. Exact/fuzzy match on product title
-      const exactMatch = productTitles.find(prod => 
-        fuzzyMatch(name, prod.title, 0.70)
-      );
+      // Build filtered product list based on category
+      let productsToSearch = productTitles;
+      if (deviceCategory) {
+        productsToSearch = productTitles.filter(p => p.category === deviceCategory);
+      }
+      
+      // Remove SKU numbers from name for better matching
+      // SKU numbers are typically 1-3 digits at the end
+      const nameWithoutSku = name.replace(/\s+\d{1,3}\s*$/, '').trim();
+      
+      // 1. Exact/fuzzy match on product title (with SKU removed)
+      const exactMatch = productsToSearch.find(prod => {
+        const prodWithoutSku = prod.title.replace(/\s+\d{1,3}\s*$/, '').trim();
+        return fuzzyMatch(nameWithoutSku, prodWithoutSku, 0.68);
+      });
       
       if (exactMatch) {
         matchedProducts.push(exactMatch);
         continue;
       }
       
-      // 2. Try partial match on brand
-      const brandMatches = productTitles.filter(prod => 
-        prod.brand && fuzzyMatch(name, prod.brand, 0.75)
+      // 2. Try full name match including SKU
+      const fullMatch = productsToSearch.find(prod => 
+        fuzzyMatch(name, prod.title, 0.70)
+      );
+      
+      if (fullMatch) {
+        matchedProducts.push(fullMatch);
+        continue;
+      }
+      
+      // 3. Try partial match on brand
+      const brandMatches = productsToSearch.filter(prod => 
+        prod.brand && fuzzyMatch(nameWithoutSku, prod.brand, 0.75)
       ).slice(0, 1);
       
       if (brandMatches.length > 0) {
@@ -357,10 +426,11 @@ async function detectComparisonIntent(query) {
         continue;
       }
       
-      // 3. Fuzzy match with lower threshold
-      const fuzzyMatches = productTitles.filter(prod => 
-        fuzzyMatch(name, prod.title, 0.55)
-      ).slice(0, 1);
+      // 4. Fuzzy match with lower threshold
+      const fuzzyMatches = productsToSearch.filter(prod => {
+        const prodWithoutSku = prod.title.replace(/\s+\d{1,3}\s*$/, '').trim();
+        return fuzzyMatch(nameWithoutSku, prodWithoutSku, 0.52);
+      }).slice(0, 1);
       
       if (fuzzyMatches.length > 0) {
         matchedProducts.push(fuzzyMatches[0]);
@@ -383,6 +453,7 @@ async function detectComparisonIntent(query) {
       productIds: uniqueProducts.map(p => p.id),
       productTitles: uniqueProducts.map(p => p.title),
       matchedProducts: uniqueProducts,
+      deviceCategory: deviceCategory,
     };
   }
   
@@ -393,6 +464,7 @@ async function detectComparisonIntent(query) {
       confidence: 0.75,
       reason: 'Comparison intent detected but unable to find multiple products',
       productNames: productNames,
+      deviceCategory: deviceCategory,
     };
   }
   
