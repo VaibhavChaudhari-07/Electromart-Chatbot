@@ -53,7 +53,23 @@ const INTENT_RULES = [
 async function detectIntent(query) {
   const q = query.toLowerCase().trim();
 
-  // Check for comparison keywords FIRST - if present, prioritize comparison intent
+  // **INTENT 0 (HIGHEST PRIORITY): Recommendation** - Check FIRST if "best", "top", "recommend" keywords present
+  // These are strong signals for recommendation intent and should take precedence
+  const strongRecKeywords = ['best', 'top', 'recommend', 'suggestion', 'suggest'];
+  const hasStrongRecKeyword = strongRecKeywords.some(kw => q.includes(kw));
+  
+  if (hasStrongRecKeyword) {
+    try {
+      const rec = await detectRecommendationIntent(q);
+      if (rec) {
+        return rec;
+      }
+    } catch (e) {
+      console.error('Recommendation extraction error:', e.message);
+    }
+  }
+
+  // Check for comparison keywords - if present, prioritize comparison intent
   const strongComparisonKeywords = ['compare', 'comparison', 'vs', 'versus', 'vs '];
   const hasComparisonKeyword = strongComparisonKeywords.some(kw => q.includes(kw));
 
@@ -105,6 +121,11 @@ async function detectIntent(query) {
         if (rule.intent === "order_support" && isProductQuery) {
           continue;
         }
+        // Skip recommendation intent here since we already checked it above
+        if (rule.intent === 'product_recommendation') {
+          continue;
+        }
+
         return { intent: rule.intent, confidence: rule.confidence, reason: `Matched keyword: ${kw}` };
       }
     }
@@ -302,18 +323,55 @@ function extractProductNames(query) {
 
 /**
  * Extract device category from query (phone, laptop, tv, etc.)
+ * Prioritizes exact matches and handles brand-to-category mappings
  */
 function extractDeviceCategory(query) {
   const q = query.toLowerCase();
   
+  // Enhanced category keywords with more aliases
   const categoryMap = {
-    'Smartphones': ['phone', 'smartphone', 'mobile', 'iphone', 'android', 'galaxy', 's24', 's23', 'pixel', 'oneplus', 'realme'],
-    'Laptops': ['laptop', 'notebook', 'macbook', 'xps', 'legion', 'envy', 'thinkpad', 'omen', 'rog', 'gaming laptop'],
-    'Smart TVs': ['tv', 'smart tv', 'television', 'display', '4k', '8k', 'oled'],
-    'Wearables': ['watch', 'smartwatch', 'band', 'tracker', 'airpods', 'earbuds', 'headphones'],
-    'Accessories': ['charger', 'cable', 'adapter', 'case', 'screen protector']
+    'Smartphones': [
+      'phone', 'smartphone', 'mobile', 'cellphone', 'android phone', 'ios',
+      'iphone', 'galaxy', 'pixel', 'oneplus', 'realme', 'xiaomi', 'poco', 'redmi', 'vivo', 'oppo',
+      'nokia', 'motorola', 's24', 's23', 's22', 'a14', 'a15', 'a16', 'note', 'iphone 15', 'iphone 14'
+    ],
+    'Laptops': [
+      'laptop', 'notebook', 'book', 'computer',
+      'macbook', 'xps', 'legion', 'envy', 'thinkpad', 'omen', 'rog', 'razer',
+      'gaming laptop', 'ultrabook', 'chromebook', 'dell', 'hp', 'asus', 'lenovo', 'acer',
+      'surface', 'inspiron', 'pavilion'
+    ],
+    'Smart TVs': [
+      'tv', 'smart tv', 'television', 'led tv', 'qled', 'oled', '4k tv',
+      'display', '4k', '8k', 'oled', 'qled', 'mini led', 'lg tv', 'samsung tv', 'sony tv'
+    ],
+    'Wearables': [
+      'watch', 'smartwatch', 'smartband', 'fitness band', 'band', 'tracker', 'fitness tracker',
+      'airpods', 'earbuds', 'earphones', 'wireless earbuds', 'true wireless',
+      'headphones', 'headset', 'neckband'
+    ],
+    'Accessories': [
+      'charger', 'cable', 'adapter', 'case', 'screen protector', 'tempered glass',
+      'power bank', 'charging', 'accessory', 'cover', 'stand', 'mount', 'holder'
+    ]
   };
   
+  // Multi-word phrase priorities
+  const phraseMap = {
+    'Smartphones': ['best phone', 'best smartphone', 'top phone', 'phone under', 'smartphone under'],
+    'Laptops': ['best laptop', 'top laptop', 'laptop under', 'gaming laptop'],
+    'Smart TVs': ['best tv', 'top tv', 'tv under', '4k tv'],
+    'Wearables': ['best watch', 'smartwatch', 'best earbuds', 'wireless earbuds']
+  };
+  
+  // Check for exact multi-word phrases first
+  for (const [category, phrases] of Object.entries(phraseMap)) {
+    if (phrases.some(phrase => q.includes(phrase))) {
+      return category;
+    }
+  }
+  
+  // Check for single keyword matches
   for (const [category, keywords] of Object.entries(categoryMap)) {
     if (keywords.some(kw => q.includes(kw))) {
       return category;
@@ -502,4 +560,96 @@ async function detectComparisonIntent(query) {
   return null;
 }
 
-module.exports = { detectIntent, detectExactProductIntent, detectComparisonIntent };
+/**
+ * Detect recommendation intent and extract constraints
+ * Enhanced to handle: category, price (k/lakh/₹/number), brands, use-cases, ratings
+ */
+async function detectRecommendationIntent(query) {
+  const q = query.toLowerCase();
+
+  // Enhanced recommendation keywords including implicit ones
+  const recKeywords = [
+    'recommend', 'recommendation', 'best', 'top', 'top rated', 'suggest', 'suggestion',
+    'recommend me', 'recommendations', 'top 5', 'top 10', 'best for', 'good', 'should buy',
+    'perfect', 'excellent', 'great', 'must have', 'popular'
+  ];
+  const hasRec = recKeywords.some(kw => q.includes(kw));
+  if (!hasRec) return null;
+
+  // Extract category if any (high priority)
+  const category = extractDeviceCategory(query);
+
+  // Enhanced budget extraction supporting: "under 50000", "under 50k", "under 5 lakh", "₹50000", etc.
+  let priceLimit = null;
+  
+  // Try "under/below X lakh" format
+  const lakhMatch = query.match(/(?:under|below|less than|cheaper than|up to)\s+([0-9]+)\s*lakh/i);
+  if (lakhMatch) {
+    priceLimit = parseInt(lakhMatch[1], 10) * 100000;
+  } else {
+    // Try "under X k" format
+    const kMatch = query.match(/(?:under|below|less than|cheaper than|up to)\s+([0-9]+)\s*k(?!b)/i);
+    if (kMatch) {
+      priceLimit = parseInt(kMatch[1], 10) * 1000;
+    } else {
+      // Try "under ₹X" or "under XXXXX" format
+      const rupeesMatch = query.match(/(?:under|below|less than|cheaper than|up to)\s+₹?\s*([0-9,]+)\b/i);
+      if (rupeesMatch) {
+        priceLimit = parseInt(rupeesMatch[1].replace(/,/g, ''), 10);
+      } else {
+        // Try "between X and Y" format
+        const betweenMatch = query.match(/between\s+₹?\s*([0-9,]+)\s+(?:and|to)\s+₹?\s*([0-9,]+)/i);
+        if (betweenMatch) {
+          // Use upper limit as priceLimit
+          priceLimit = parseInt(betweenMatch[2].replace(/,/g, ''), 10);
+        }
+      }
+    }
+  }
+
+  // Enhanced brand extraction - more brands and fuzzy matching
+  const allBrands = [
+    'apple', 'samsung', 'dell', 'hp', 'lenovo', 'asus', 'oneplus', 'xiaomi', 'realme',
+    'sony', 'bose', 'acer', 'msi', 'razer', 'lg', 'panasonic', 'motorola', 'nokia',
+    'poco', 'redmi', 'realme', 'vivo', 'oppo', 'iphone', 'macbook', 'ipad'
+  ];
+  const foundBrands = allBrands.filter(b => q.includes(b));
+
+  // Enhanced use-case extraction
+  const allUseCases = [
+    'gaming', 'programming', 'students', 'office', 'video editing', 'content creation',
+    'travel', 'battery', 'camera', 'photography', 'fitness', 'sports', 'music',
+    'professional', 'work', 'study', 'heavy use', 'light use', 'streaming', 'editing'
+  ];
+  const foundUseCases = allUseCases.filter(u => q.includes(u));
+
+  // Extract rating-focused constraints
+  const ratingMatch = q.match(
+    /(above|over|greater than|atleast|minimum)\s*([0-9]\.?[0-9]?)\s*(?:star|rating|\*)?|([0-9]\.?[0-9]?)\s*(?:\+|plus|and above)\s*(?:star|rating|\*)?/i
+  );
+  let minRating = null;
+  if (ratingMatch) {
+    const ratingVal = parseFloat(ratingMatch[2] || ratingMatch[3]);
+    if (ratingVal >= 1 && ratingVal <= 5) {
+      minRating = ratingVal;
+    }
+  }
+
+  // Boost confidence if category is found
+  let confidence = 0.88;
+  if (category) confidence = 0.92;
+  if (category && priceLimit) confidence = 0.95;
+
+  return {
+    intent: 'product_recommendation',
+    confidence,
+    reason: 'Recommendation intent detected',
+    category,
+    priceLimit,
+    brands: foundBrands,
+    useCases: foundUseCases,
+    minRating,
+  };
+}
+
+module.exports = { detectIntent, detectExactProductIntent, detectComparisonIntent, detectRecommendationIntent };

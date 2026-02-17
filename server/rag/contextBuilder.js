@@ -68,6 +68,7 @@ async function fusionContext(routingContext, query, { userId } = {}) {
       fusedData.metadata = {
         count: fusedData.items.length,
         sortBy: ["rating", "popularity"],
+        appliedFilters: data.appliedFilters || null,
       };
     } else if (route === "order_db") {
       // Order tracking

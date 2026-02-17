@@ -337,20 +337,62 @@ function generateComparisonResponse(query, context) {
  */
 function generateRecommendationResponse(query, context) {
   const products = context.items || [];
+  const filters = context.metadata?.appliedFilters || context.appliedFilters || {};
 
   if (products.length === 0) {
     return `I don't have any product recommendations at this moment. Please check back soon!`;
   }
 
-  let response = `🌟 **Top Recommendations for You**\n\n`;
+  let response = `🌟 **Top Recommendations**\n\n`;
 
+  // Show applied filters/rationale
+  const filterLines = [];
+  if (filters.category) filterLines.push(`Category: ${filters.category}`);
+  if (filters.brands && filters.brands.length) filterLines.push(`Brands: ${filters.brands.join(', ')}`);
+  if (filters.priceLimit) filterLines.push(`Budget: up to ₹${Number(filters.priceLimit).toLocaleString()}`);
+  if (filters.minRating) filterLines.push(`Min rating: ${filters.minRating}/5`);
+  if (filterLines.length > 0) {
+    response += `🔎 Filters applied — ${filterLines.join(' • ')}\n\n`;
+  }
+
+  // Render a concise ranked list with rationale per item
   products.slice(0, 5).forEach((p, i) => {
-    response += `**${i + 1}. ${p.title}**\n`;
-    response += `   ⭐ ${p.rating || "N/A"}/5 | ₹${p.price}\n`;
-    response += `   ${p.description ? p.description.slice(0, 60) : ""}...\n\n`;
+    const title = p.title || p.name || 'Product';
+    const price = p.price ? `₹${Number(p.price).toLocaleString()}` : 'Price N/A';
+    const rating = p.rating ? `⭐ ${p.rating}/5` : 'Rating N/A';
+
+    // Short spec summary
+    let specSummary = '';
+    if (p.specifications) {
+      const s = p.specifications;
+      const parts = [];
+      if (s.processor) parts.push(s.processor);
+      if (s.ram) parts.push(s.ram);
+      if (s.storage) parts.push(s.storage);
+      if (s.battery_life) parts.push(s.battery_life + ' battery');
+      if (s.display) parts.push(s.display);
+      specSummary = parts.slice(0, 4).join(' • ');
+    }
+
+    // Why recommended: build short rationale
+    const reasons = [];
+    if (p.rating && p.rating >= 4.5) reasons.push('Top rated');
+    if (filters.priceLimit && p.price && p.price <= filters.priceLimit) reasons.push('Within budget');
+    if (filters.brands && filters.brands.length && filters.brands.includes((p.brand || '').toLowerCase())) reasons.push('Preferred brand');
+    if (p.specifications && filters && filters.useCases && filters.useCases.length) {
+      const bestFor = (p.specifications.best_for || '').toLowerCase();
+      if (filters.useCases.some(u => bestFor.includes(u))) reasons.push('Matches use-case');
+    }
+
+    response += `**${i + 1}. ${title}**\n`;
+    response += `   ${rating} | ${price}\n`;
+    if (specSummary) response += `   ⚙️ ${specSummary}\n`;
+    if (reasons.length > 0) response += `   ✅ ${reasons.join(' • ')}\n`;
+    if (p.description) response += `   📝 ${p.description.slice(0, 100)}\n`;
+    response += `\n`;
   });
 
-  response += `✨ These are our most popular and highly-rated products. Click any to view details!`;
+  response += `✨ These recommendations are based on ratings, popularity, and the filters you provided. Want me to show more, narrow the budget, or compare any of these?`;
   return response;
 }
 

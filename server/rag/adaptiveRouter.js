@@ -5,6 +5,11 @@ const Product = require("../models/Product");
 const Order = require("../models/Order");
 const User = require("../models/User");
 
+// Utility: escape regex special chars in user-provided brand strings
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+}
+
 /**
  * Adaptive Router: Routes intent to appropriate retrieval system
  * Returns: { intent, route, data }
@@ -196,13 +201,113 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
         break;
 
       case "product_recommendation":
-        // Recommendation based on category popularity and ratings
-        const recommendations = await Product.find()
-          .sort({ rating: -1, salesCount: -1 })
-          .limit(5);
-        context.route = "recommendation_engine";
-        context.data.products = recommendations;
-        context.data.retrievalType = "recommendation";
+        // Recommendation: apply intent constraints, with CATEGORY as strict primary filter
+        try {
+          const filters = {};
+          const appliedFilters = {};
+          let baseFilters = {}; // Filters that MUST be applied (like category)
+          
+          // STRICT: Category is the primary filter - enforce it if present
+          if (intentObj.category) {
+            baseFilters.category = intentObj.category;
+            filters.category = intentObj.category;
+            appliedFilters.category = intentObj.category;
+          }
+
+          // Brands
+          if (intentObj.brands && Array.isArray(intentObj.brands) && intentObj.brands.length > 0) {
+            // Brand filter is optional but applied if present
+            filters.brand = { $regex: intentObj.brands.map(b => escapeRegex(b)).join('|'), $options: 'i' };
+            appliedFilters.brands = intentObj.brands;
+          }
+
+          // Price limit
+          if (intentObj.priceLimit && Number.isFinite(intentObj.priceLimit)) {
+            filters.price = { $lte: intentObj.priceLimit };
+            appliedFilters.priceLimit = intentObj.priceLimit;
+          }
+
+          // Minimum rating
+          if (intentObj.minRating && Number.isFinite(intentObj.minRating)) {
+            filters.rating = { $gte: intentObj.minRating };
+            appliedFilters.minRating = intentObj.minRating;
+          }
+
+          // Base query - apply all filters collected above
+          let candidates = await Product.find(filters).lean().limit(50);
+          console.log(`[Recommendation] Applied filters: ${JSON.stringify(filters)}. Found ${candidates.length} products.`);
+
+          // If use-cases specified, prefer products whose specifications.best_for or description/title mention them
+          const rankingQueryParts = [];
+          if (intentObj.category) rankingQueryParts.push(intentObj.category);
+          if (intentObj.brands && intentObj.brands.length) rankingQueryParts.push(intentObj.brands.join(' '));
+          if (intentObj.useCases && intentObj.useCases.length) rankingQueryParts.push(intentObj.useCases.join(' '));
+          const rankingQuery = rankingQueryParts.join(' ').trim() || query;
+
+          let ranked = candidates;
+          if (ranked && ranked.length > 0) {
+            // Use local scoring to rank relevance to user's request
+            ranked = scoreProductsByQuery(ranked, rankingQuery || query);
+          }
+
+          // Fallback 1: if no candidates found with all filters, try CATEGORY ONLY (preserve strict category)
+          if ((!ranked || ranked.length === 0) && Object.keys(filters).length > 1) {
+            console.log(`[Recommendation] No matches with all filters. Trying category-only fallback.`);
+            const categoryOnly = await Product.find(baseFilters).lean().limit(50);
+            if (categoryOnly && categoryOnly.length > 0) {
+              ranked = scoreProductsByQuery(categoryOnly, rankingQuery || query);
+            }
+          }
+          
+          // Fallback 2: if still empty and use-cases specified, search for use-case matches
+          if ((!ranked || ranked.length === 0) && (intentObj.useCases && intentObj.useCases.length)) {
+            console.log(`[Recommendation] Still no matches. Trying use-case search.`);
+            const useCaseRegex = intentObj.useCases.map(u => escapeRegex(u)).join('|');
+            const broaden = await Product.find({
+              $or: [
+                { 'specifications.best_for': { $regex: useCaseRegex, $options: 'i' } },
+                { title: { $regex: useCaseRegex, $options: 'i' } },
+                { description: { $regex: useCaseRegex, $options: 'i' } }
+              ]
+            }).limit(50).lean();
+            if (broaden && broaden.length > 0) {
+              ranked = scoreProductsByQuery(broaden, rankingQuery || query);
+            }
+          }
+
+          // Fallback 3: If category was specified, try top-rated in that category
+          if ((!ranked || ranked.length === 0) && intentObj.category) {
+            console.log(`[Recommendation] Using top-rated in category: ${intentObj.category}`);
+            const topInCategory = await Product.find({ category: intentObj.category })
+              .sort({ rating: -1, ratingCount: -1, price: 1 })
+              .limit(5)
+              .lean();
+            ranked = topInCategory;
+            appliedFilters.fallback = 'top_rated_in_category';
+          }
+          
+          // Fallback 4: If still empty, fall back to top-rated overall
+          if (!ranked || ranked.length === 0) {
+            console.log(`[Recommendation] Using global top-rated fallback.`);
+            const fallback = await Product.find().sort({ rating: -1, salesCount: -1 }).limit(5).lean();
+            ranked = fallback;
+            appliedFilters.fallback = 'global_top_rated';
+          }
+
+          const top = (ranked || []).slice(0, 5);
+
+          context.route = "recommendation_engine";
+          context.data.products = top;
+          context.data.retrievalType = "recommendation";
+          context.data.appliedFilters = appliedFilters;
+        } catch (recErr) {
+          console.error('Recommendation routing error:', recErr.message);
+          const fallback = await Product.find().sort({ rating: -1, salesCount: -1 }).limit(5).lean();
+          context.route = "recommendation_engine";
+          context.data.products = fallback;
+          context.data.retrievalType = "recommendation";
+          context.data.appliedFilters = { fallback: true };
+        }
         break;
 
       case "order_tracking":
