@@ -75,57 +75,121 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
         break;
 
       case "product_comparison":
-        // If intent detection already matched products, use them
+        // If intent detection already matched products, use them strictly.
+        // We will NOT perform broad regex or semantic fallbacks for explicit SKU/name comparisons.
         let comparisonProducts = [];
-        
-        if (intentObj.productIds && intentObj.productIds.length >= 2) {
-          // Use matched products from intent detection
-          comparisonProducts = await Product.find({
-            _id: { $in: intentObj.productIds }
-          }).lean();
-        } else {
-          // Fallback: Extract product names from query
-          let productNames = await extractProductNames(query);
-          
-          // If we still don't have 2+ products, try semantic search on the query
-          if (productNames.length < 2) {
-            try {
-              const embedding = await embedQuery(query);
-              const semanticResults = await semanticSearch(embedding, 6);
-              productNames = semanticResults.map(p => p.title);
-            } catch (e) {
-              console.error("Semantic fallback failed:", e.message);
-            }
-          }
+        let expectedProductCount = 2;
 
-          // Now try to find products matching extracted names
-          if (productNames.length >= 2) {
-            comparisonProducts = await Product.find({
-              title: {
-                $regex: productNames
-                  .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-                  .join("|"),
-                $options: "i"
-              }
-            }).limit(5).lean();
+        // 1) If intent provided exact productIds, fetch them and preserve order
+        if (intentObj.productIds && Array.isArray(intentObj.productIds) && intentObj.productIds.length >= 2) {
+          expectedProductCount = intentObj.productIds.length;
+          // fetch products in the order of provided IDs
+          const productsMap = {};
+          const rows = await Product.find({ _id: { $in: intentObj.productIds } }).lean();
+          rows.forEach(r => { productsMap[r._id.toString()] = r; });
+          comparisonProducts = intentObj.productIds
+            .map(id => productsMap[id.toString()])
+            .filter(Boolean);
+
+          // Only accept if we found all requested products
+          if (comparisonProducts.length === expectedProductCount) {
+            context.route = "mongodb_comparison";
+            context.data.products = comparisonProducts;
+            context.data.retrievalType = "comparison";
+            break;
           }
+          // If some ids missing, ask user to confirm exact SKUs
+          context.route = "llm_only";
+          context.data.products = [];
+          context.data.retrievalType = "none";
+          context.data.message = `I couldn't find all specified products by the provided IDs/SKUs. Please confirm exact product names or SKUs.`;
+          break;
+        }
+
+        // 2) If intent provided productNames, perform strict per-name matching and require matches for every name
+        if (intentObj.productNames && Array.isArray(intentObj.productNames) && intentObj.productNames.length >= 2) {
+          const productNames = intentObj.productNames;
+          expectedProductCount = productNames.length;
+          const found = [];
+          for (const name of productNames) {
+            const esc = name.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+            // Try exact title match first, then contains
+            let p = await Product.findOne({ title: { $regex: `^${esc}$`, $options: 'i' } }).lean();
+            if (!p) p = await Product.findOne({ title: { $regex: esc, $options: 'i' } }).lean();
+            if (p) found.push(p);
+          }
+          if (found.length === expectedProductCount) {
+            context.route = "mongodb_comparison";
+            context.data.products = found;
+            context.data.retrievalType = "comparison";
+            break;
+          }
+          context.route = "llm_only";
+          context.data.products = [];
+          context.data.retrievalType = "none";
+          context.data.message = `I could only match ${found.length} of ${expectedProductCount} requested products. Please provide exact product names or SKUs.`;
+          break;
+        }
+
+        // 3) Allow broad/fallback searches only for explicit bulk/broad queries (e.g. "top 5", "best", "all Envy")
+        const lower = query.toLowerCase();
+        const bulkKeywords = ['top', 'best', 'all', 'latest', 'top 5', 'top 10', 'compare top', 'compare all', 'compare best', 'cheapest', 'budget'];
+        const isBulkQuery = bulkKeywords.some(k => lower.includes(k));
+        if (!isBulkQuery) {
+          // Not a bulk query and no explicit names/ids — ask user to specify
+          context.route = "llm_only";
+          context.data.products = [];
+          context.data.retrievalType = "none";
+          context.data.message = 'Please specify the exact product names or SKUs you want to compare (e.g., "HP Envy 13 10 vs HP Envy 13 28").';
+          break;
+        }
+
+        // 4) Bulk query path: perform semantic/regex search as a fallback
+        let productNamesFallback = await extractProductNames(query);
+        if (productNamesFallback.length < 2) {
+          try {
+            const embedding = await embedQuery(query);
+            const semanticResults = await semanticSearch(embedding, 6);
+            productNamesFallback = semanticResults.map(p => p.title);
+          } catch (e) {
+            console.error('Semantic fallback failed:', e.message);
+          }
+        }
+        if (productNamesFallback.length >= 2) {
+          comparisonProducts = await Product.find({
+            title: {
+              $regex: productNamesFallback
+                .map(name => name.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&"))
+                .join("|"),
+              $options: "i"
+            }
+          }).limit(10).lean();
         }
 
         if (comparisonProducts && comparisonProducts.length >= 2) {
           context.route = "mongodb_comparison";
-          context.data.products = comparisonProducts.slice(0, 5); // Max 5 products for comparison
+          context.data.products = comparisonProducts.slice(0, 10);
           context.data.retrievalType = "comparison";
         } else {
-          // Not enough products found - try semantic fallback
+          // Not enough DB matches — try semantic fallback; otherwise ask for clarification
           try {
             const embedding = await embedQuery(query);
             const fallbackResults = await semanticSearch(embedding, 5);
-            context.route = "product_vector_db";
-            context.data.products = fallbackResults;
-            context.data.retrievalType = "semantic";
-            context.data.message = "Here are similar products you might want to compare:";
+            if (fallbackResults && fallbackResults.length >= 2) {
+              context.route = "product_vector_db";
+              context.data.products = fallbackResults;
+              context.data.retrievalType = "semantic";
+              context.data.message = "Here are similar products you might want to compare:";
+            } else {
+              context.route = "llm_only";
+              context.data.products = [];
+              context.data.retrievalType = "none";
+              context.data.message = "I need product names to compare. Could you specify which products?";
+            }
           } catch (e) {
             context.route = "llm_only";
+            context.data.products = [];
+            context.data.retrievalType = "none";
             context.data.message = "I need product names to compare. Could you specify which products?";
           }
         }

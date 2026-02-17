@@ -273,10 +273,11 @@ async function detectExactProductIntent(query) {
 function extractProductNames(query) {
   const q = query.toLowerCase();
   
-  // Remove comparison keywords
+  // Remove comparison keywords (including 'vs' variants) but preserve the separators
   const cleanQuery = q
-    .replace(/\b(compare|comparison|vs|versus|than|between|against)\b/g, '|')
-    .replace(/\b(and|or|,)\b/g, '|');
+    .replace(/\b(compare|comparison|versus|between|against|vs|v)\b/g, '|')
+    .replace(/\b(and|or|,)\b/g, '|')
+    .replace(/vs\.?/g, '|');
   
   // Split by delimiters and filter empty strings
   const parts = cleanQuery
@@ -285,12 +286,18 @@ function extractProductNames(query) {
     .filter(s => s.length > 2 && s.length < 100);
   
   // Remove common non-product words
-  const nonProductWords = ['phones', 'laptops', 'tvs', 'watches', 'earbuds', 'headphones', 'speakers', 'tablets', 'cameras', 'which', 'better', 'best', 'good', 'bad', 'for', 'with', 'comparison', 'compare'];
+  const nonProductWords = ['phones', 'laptops', 'tvs', 'watches', 'earbuds', 'headphones', 'speakers', 'tablets', 'cameras', 'which', 'better', 'best', 'good', 'bad', 'for', 'with', 'comparison', 'compare', 'phone', 'laptop', 'tv', 'watch'];
   
-  return parts.filter(part => {
+  const productNames = parts.filter(part => {
     const word = part.split(/\s+/)[0];
     return !nonProductWords.includes(word);
   });
+
+  // Return with explicit count of products mentioned
+  return {
+    names: productNames,
+    count: productNames.length
+  };
 }
 
 /**
@@ -336,7 +343,9 @@ async function detectComparisonIntent(query) {
   }
   
   // Extract potential product names
-  const productNames = extractProductNames(query);
+  const productNamesData = extractProductNames(query);
+  const productNames = productNamesData.names;
+  const expectedProductCount = productNamesData.count;
   
   // For weak comparison keywords, we need at least 2 product names
   if (!hasStrongComparison && productNames.length < 2) {
@@ -381,8 +390,10 @@ async function detectComparisonIntent(query) {
       }
     }
   } else {
-    // Match extracted product names
+    // Match extracted product names - STRICT ONE-TO-ONE MATCHING
+    // Only return exactly as many products as explicitly mentioned in the query
     const matchedProducts = [];
+    const usedProductIds = new Set();
     
     for (const name of productNames) {
       // Build filtered product list based on category
@@ -391,68 +402,88 @@ async function detectComparisonIntent(query) {
         productsToSearch = productTitles.filter(p => p.category === deviceCategory);
       }
       
+      // Exclude already matched products to avoid duplicates
+      productsToSearch = productsToSearch.filter(p => !usedProductIds.has(p.id.toString()));
+      
       // Remove SKU numbers from name for better matching
-      // SKU numbers are typically 1-3 digits at the end
       const nameWithoutSku = name.replace(/\s+\d{1,3}\s*$/, '').trim();
       
-      // 1. Exact/fuzzy match on product title (with SKU removed)
-      const exactMatch = productsToSearch.find(prod => {
-        const prodWithoutSku = prod.title.replace(/\s+\d{1,3}\s*$/, '').trim();
-        return fuzzyMatch(nameWithoutSku, prodWithoutSku, 0.68);
-      });
+      let matchedProduct = null;
       
-      if (exactMatch) {
-        matchedProducts.push(exactMatch);
-        continue;
-      }
-      
-      // 2. Try full name match including SKU
-      const fullMatch = productsToSearch.find(prod => 
-        fuzzyMatch(name, prod.title, 0.70)
+      // 1. EXACT match with SKU number (e.g., "HP Envy 13 10" matches exactly)
+      matchedProduct = productsToSearch.find(prod => 
+        fuzzyMatch(name, prod.title, 0.88)
       );
       
-      if (fullMatch) {
-        matchedProducts.push(fullMatch);
+      if (matchedProduct) {
+        matchedProducts.push(matchedProduct);
+        usedProductIds.add(matchedProduct.id.toString());
         continue;
       }
       
-      // 3. Try partial match on brand
+      // 2. Exact/fuzzy match on product title (with SKU removed)
+      matchedProduct = productsToSearch.find(prod => {
+        const prodWithoutSku = prod.title.replace(/\s+\d{1,3}\s*$/, '').trim();
+        return fuzzyMatch(nameWithoutSku, prodWithoutSku, 0.70);
+      });
+      
+      if (matchedProduct) {
+        matchedProducts.push(matchedProduct);
+        usedProductIds.add(matchedProduct.id.toString());
+        continue;
+      }
+      
+      // 3. Try full name match including SKU
+      matchedProduct = productsToSearch.find(prod => 
+        fuzzyMatch(name, prod.title, 0.68)
+      );
+      
+      if (matchedProduct) {
+        matchedProducts.push(matchedProduct);
+        usedProductIds.add(matchedProduct.id.toString());
+        continue;
+      }
+      
+      // 4. Try partial match on brand
       const brandMatches = productsToSearch.filter(prod => 
         prod.brand && fuzzyMatch(nameWithoutSku, prod.brand, 0.75)
-      ).slice(0, 1);
+      );
       
       if (brandMatches.length > 0) {
-        matchedProducts.push(brandMatches[0]);
+        matchedProduct = brandMatches[0];
+        matchedProducts.push(matchedProduct);
+        usedProductIds.add(matchedProduct.id.toString());
         continue;
       }
       
-      // 4. Fuzzy match with lower threshold
+      // 5. Fuzzy match with lower threshold
       const fuzzyMatches = productsToSearch.filter(prod => {
         const prodWithoutSku = prod.title.replace(/\s+\d{1,3}\s*$/, '').trim();
         return fuzzyMatch(nameWithoutSku, prodWithoutSku, 0.52);
-      }).slice(0, 1);
+      });
       
       if (fuzzyMatches.length > 0) {
-        matchedProducts.push(fuzzyMatches[0]);
+        matchedProduct = fuzzyMatches[0];
+        matchedProducts.push(matchedProduct);
+        usedProductIds.add(matchedProduct.id.toString());
       }
     }
     
     candidateProducts = matchedProducts;
   }
   
-  // Return intent only if we found 2+ unique products
-  const uniqueProducts = Array.from(new Map(
-    candidateProducts.map(p => [p.id.toString(), p])
-  ).values());
+  // Return intent only if we found exactly the requested number of products (min 2)
+  // STRICT: No more, no less than what was mentioned in the query
+  const limitedProducts = candidateProducts.slice(0, expectedProductCount || 2);
   
-  if (uniqueProducts.length >= 2) {
+  if (limitedProducts.length >= 2) {
     return {
       intent: 'product_comparison',
       confidence: 0.92,
-      reason: `Comparison of ${uniqueProducts.length} products detected`,
-      productIds: uniqueProducts.map(p => p.id),
-      productTitles: uniqueProducts.map(p => p.title),
-      matchedProducts: uniqueProducts,
+      reason: `Comparison of ${limitedProducts.length} products detected`,
+      productIds: limitedProducts.map(p => p.id),
+      productTitles: limitedProducts.map(p => p.title),
+      matchedProducts: limitedProducts,
       deviceCategory: deviceCategory,
     };
   }

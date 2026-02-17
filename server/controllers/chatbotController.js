@@ -15,9 +15,7 @@ exports.chatbotReply = async (req, res) => {
 
     // Step 1: Intent Detection - Identify query intent
     const intentObj = await detectIntent(query);
-    console.log(
-      `[Intent] ${intentObj.intent} (confidence: ${intentObj.confidence})`
-    );
+    console.log(`[Intent] ${intentObj.intent} (confidence: ${intentObj.confidence})`);
 
     // Step 2: Adaptive Routing & Context Fusion
     const context = await buildContext(query, intentObj, { userId });

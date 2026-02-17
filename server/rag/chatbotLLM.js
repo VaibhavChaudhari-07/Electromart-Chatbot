@@ -192,17 +192,16 @@ function generateComparisonResponse(query, context) {
     }
     
     if (context.message) {
+
       return context.message;
     }
     return `I need at least 2 products to compare. Could you specify which products you'd like to compare? For example: "Compare iPhone 15 and Samsung S24" 📱`;
   }
 
-  let response = ``;
-  
-  // Create comparison table with up to 5 products
-  const comparableProducts = products.slice(0, 5);
-  
-  // Define required specification fields for comparison (map to specification keys)
+  let response = '';
+  // Always show only the matched products (2 for A vs B, 3 for A vs B vs C, etc)
+  const comparableProducts = products;
+  // Table fields
   const specFieldMap = {
     'Processor': 'processor',
     'RAM': 'ram',
@@ -212,65 +211,49 @@ function generateComparisonResponse(query, context) {
     'GPU': 'gpu',
     'Best For': 'best_for'
   };
-
-  // Helper function to format specification values
   function formatSpecValue(val) {
     if (!val) return '-';
-    if (typeof val === 'string') return val.substring(0, 28);
-    if (typeof val === 'number') return String(val).substring(0, 28);
-    return String(val).substring(0, 28);
+    if (typeof val === 'string') return val.substring(0, 22);
+    if (typeof val === 'number') return String(val).substring(0, 22);
+    return String(val).substring(0, 22);
   }
-
-  // Helper function to truncate product names nicely
   function formatProductName(name) {
-    if (name.length > 22) {
-      return name.substring(0, 19) + '...';
+    const maxLen = Math.floor(40 / Math.max(2, comparableProducts.length));
+    if (name.length > maxLen) {
+      return name.substring(0, maxLen - 3) + '...';
     }
     return name;
   }
-  
-  // ===== HEADING SECTION =====
-  response += `\n═══════════════════════════════════════\n`;
-  response += `⚖️  PRODUCT COMPARISON\n`;
-  response += `═══════════════════════════════════════\n\n`;
-  response += `📊 Comparing **${comparableProducts.length} products**\n\n`;
-
-  // ===== COMPARISON TABLE =====
-  response += `**COMPARISON TABLE**\n`;
-  response += `\n| Feature | ${comparableProducts.map(p => formatProductName(p.title)).join(" | ")} |\n`;
-  response += `|:--------|${comparableProducts.map(() => ":-----|").join("")}\n`;
-
-  // Price row - formatted nicely
-  response += `| **💰 Price** | ${comparableProducts.map(p => `**₹${p.price.toLocaleString()}**`).join(" | ")} |\n`;
-
-  // Rating row - formatted nicely
-  response += `| **⭐ Rating** | ${comparableProducts.map(p => {
-    if (p.rating) return `**${p.rating}**/5 ⭐`;
+  // Heading
+  response += `\n⚖️ PRODUCT COMPARISON\n`;
+  response += `══════════════════════════════════════════════\n\n`;
+  response += `📊 Comparing ${comparableProducts.length} products\n\n`;
+  // Markdown Table
+  response += `| Feature | ${comparableProducts.map(p => formatProductName(p.title)).join(' | ')} |\n`;
+  response += `|---------|${comparableProducts.map(() => '---------|').join('')}\n`;
+  response += `| 💰 Price | ${comparableProducts.map(p => `₹${p.price.toLocaleString()}`).join(' | ')} |\n`;
+  response += `| ⭐ Rating | ${comparableProducts.map(p => {
+    if (p.rating) return `${p.rating}/5`;
     if (p.ratingCount) return `${p.ratingCount} reviews`;
     return 'N/A';
-  }).join(" | ")} |\n`;
-
-  // Add specification rows in order
+  }).join(' | ')} |\n`;
   Object.entries(specFieldMap).forEach(([displayName, specKey]) => {
-    const icons = {
+    const icon = {
       'Processor': '⚙️',
-      'RAM': '🎯',
-      'Storage': '💾',
+      'RAM': '💾',
+      'Storage': '📦',
       'Display': '🖥️',
       'Battery': '🔋',
       'GPU': '🎮',
       'Best For': '🎯'
-    };
-    const icon = icons[displayName] || '📌';
-    
-    response += `| **${icon} ${displayName}** | ${comparableProducts.map(p => {
+    }[displayName] || '◾';
+    response += `| ${icon} ${displayName} | ${comparableProducts.map(p => {
       if (p.specifications && p.specifications[specKey]) {
         return formatSpecValue(p.specifications[specKey]);
       }
       return '-';
-    }).join(" | ")} |\n`;
+    }).join(' | ')} |\n`;
   });
-
   response += `\n`;
 
   // ===== ANALYSIS SECTION =====
