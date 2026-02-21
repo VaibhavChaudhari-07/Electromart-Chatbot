@@ -74,6 +74,8 @@ async function fusionContext(routingContext, query, { userId } = {}) {
       // Order tracking
       fusedData.type = "order_tracking";
       fusedData.items = data.orders || [];
+      fusedData.orderId = data.orderId || null;
+      fusedData.mentionedProduct = data.mentionedProduct || null;
       fusedData.retrievalType = data.retrievalType;
       fusedData.userId = userId;
       fusedData.metadata = {

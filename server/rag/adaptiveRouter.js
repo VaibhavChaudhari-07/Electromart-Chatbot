@@ -311,18 +311,59 @@ async function adaptiveRoute(query, intentObj, { userId } = {}) {
         break;
 
       case "order_tracking":
-        // Order tracking from MongoDB
-        if (userId) {
-          const userOrders = await Order.find({ userId })
-            .sort({ createdAt: -1 })
-            .limit(3);
+        // Order tracking: prioritize order ID from intent, then fall back to user's recent orders
+        try {
+          let trackedOrders = [];
+
+          // If order ID was extracted from query, search for it
+          if (intentObj.orderId) {
+            console.log(`[Order Tracking] Searching for order ID: ${intentObj.orderId}`);
+            // Try to find order by ID (could be numeric or ORD prefix)
+            let searchQuery = { _id: { $regex: String(intentObj.orderId).replace(/\D/g, ''), $options: 'i' } };
+            
+            // If userId present, filter by user
+            if (userId) {
+              searchQuery.userId = userId;
+            }
+
+            let foundOrder = await Order.findOne(searchQuery).populate('items.productId').lean();
+            
+            if (foundOrder) {
+              trackedOrders = [foundOrder];
+            } else {
+              // If not found and user logged in, show their recent orders as context
+              if (userId) {
+                trackedOrders = await Order.find({ userId })
+                  .sort({ createdAt: -1 })
+                  .limit(3)
+                  .populate('items.productId')
+                  .lean();
+              }
+            }
+          } else if (userId) {
+            // No order ID provided, show user's recent orders (requires login)
+            trackedOrders = await Order.find({ userId })
+              .sort({ createdAt: -1 })
+              .limit(3)
+              .populate('items.productId')
+              .lean();
+          }
+
           context.route = "order_db";
-          context.data.orders = userOrders;
+          context.data.orders = trackedOrders;
+          context.data.orderId = intentObj.orderId || null;
+          context.data.mentionedProduct = intentObj.mentionedProduct || null;
           context.data.retrievalType = "order_tracking";
           context.data.userId = userId;
-        } else {
+          
+          if (!userId && !trackedOrders.length) {
+            context.route = "llm_only";
+            context.data.message = "Please log in to track your orders.";
+          }
+        } catch (orderErr) {
+          console.error('Order tracking error:', orderErr.message);
           context.route = "llm_only";
-          context.data.message = "Please log in to track orders";
+          context.data.message = "Unable to fetch order information. Please try again.";
         }
         break;
 

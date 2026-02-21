@@ -53,7 +53,26 @@ const INTENT_RULES = [
 async function detectIntent(query) {
   const q = query.toLowerCase().trim();
 
-  // **INTENT 0 (HIGHEST PRIORITY): Recommendation** - Check FIRST if "best", "top", "recommend" keywords present
+  // **HIGHEST PRIORITY: Order Tracking** - Check FIRST if query has order/tracking keywords
+  // This prevents product names from overriding order tracking intent
+  const strongOrderKeywords = ['track', 'tracking', 'status', 'where', 'delivery', 'shipped', 'shipment', 'order'];
+  const hasStrongOrderKeyword = strongOrderKeywords.some(kw => q.includes(kw));
+  
+  if (hasStrongOrderKeyword) {
+    try {
+      const orderTrack = detectOrderTrackingIntent(q);
+      if (orderTrack) {
+        // Return if we have explicit order ID OR if it's a generic order tracking query with confidence >= 0.85
+        if (orderTrack.orderId || orderTrack.confidence >= 0.85) {
+          return orderTrack;
+        }
+      }
+    } catch (e) {
+      console.error('Order tracking extraction error:', e.message);
+    }
+  }
+
+  // **INTENT 0 (HIGH PRIORITY): Recommendation** - Check if "best", "top", "recommend" keywords present
   // These are strong signals for recommendation intent and should take precedence
   const strongRecKeywords = ['best', 'top', 'recommend', 'suggestion', 'suggest'];
   const hasStrongRecKeyword = strongRecKeywords.some(kw => q.includes(kw));
@@ -652,4 +671,51 @@ async function detectRecommendationIntent(query) {
   };
 }
 
-module.exports = { detectIntent, detectExactProductIntent, detectComparisonIntent, detectRecommendationIntent };
+/**
+ * Detect order tracking intent and extract order ID
+ * Supports formats: ORD12345, #12345, 12345 (numeric)
+ */
+function detectOrderTrackingIntent(query) {
+  const q = query.toLowerCase();
+
+  // Check for tracking-related keywords
+  const trackingKeywords = ['track', 'tracking', 'status', 'where', 'delivery', 'shipped', 'shipment', 'order', 'dispatch', 'courier', 'package', 'update'];
+  const hasTrackingKeyword = trackingKeywords.some(kw => q.includes(kw));
+  
+  if (!hasTrackingKeyword) return null;
+
+  // Extract order ID using multiple regex patterns
+  let orderId = null;
+  
+  // Pattern 1: ORD12345 or ORD-12345
+  const ordPattern = query.match(/ORD[\s-]?([0-9]{5,8})/i);
+  if (ordPattern) {
+    orderId = 'ORD' + ordPattern[1];
+  } else {
+    // Pattern 2: #12345 or order #12345
+    const hashPattern = query.match(/#([0-9]{4,8})/i);
+    if (hashPattern) {
+      orderId = hashPattern[1];
+    } else {
+      // Pattern 3: "order 12345" or "order ID 12345"
+      const orderIdPattern = query.match(/order\s+(?:id)?\s*([0-9]{4,8})/i);
+      if (orderIdPattern) {
+        orderId = orderIdPattern[1];
+      }
+    }
+  }
+
+  // Extract product name if mentioned (e.g., "Track my Dell Legion order ORD12345")
+  const productKeywords = ['dell', 'hp', 'lenovo', 'asus', 'apple', 'samsung', 'phone', 'laptop', 'tv', 'watch'];
+  const mentionedProduct = productKeywords.find(p => q.includes(p));
+
+  return {
+    intent: 'order_tracking',
+    confidence: orderId ? 0.95 : 0.85,
+    reason: orderId ? `Order tracking for ${orderId}` : 'Order tracking intent detected',
+    orderId: orderId || null,
+    mentionedProduct: mentionedProduct || null,
+  };
+}
+
+module.exports = { detectIntent, detectExactProductIntent, detectComparisonIntent, detectRecommendationIntent, detectOrderTrackingIntent };

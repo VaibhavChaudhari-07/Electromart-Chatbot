@@ -22,7 +22,7 @@ export default function Products() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const categories = ["all", "laptops", "mobiles", "tablets", "headphones", "accessories"];
+  const categories = ["all", "Laptops", "Smartphones", "Smart TVs", "Accessories", "Wearables"];
 
   // Fetch products
   useEffect(() => {

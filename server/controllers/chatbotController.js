@@ -7,7 +7,10 @@ const Chat = require("../models/Chat");
 exports.chatbotReply = async (req, res) => {
   try {
     const query = req.body.query;
-    const userId = req.user?._id || req.admin?._id;
+    // Support both authenticated users and direct userId in body for testing
+    const userIdFromAuth = req.user?._id || req.admin?._id;
+    const userIdFromBody = req.body.userId;
+    const userId = userIdFromAuth || userIdFromBody;
 
     if (!query || query.trim().length === 0) {
       return res.status(400).json({ message: "Query cannot be empty" });
@@ -19,7 +22,7 @@ exports.chatbotReply = async (req, res) => {
 
     // Step 2: Adaptive Routing & Context Fusion
     const context = await buildContext(query, intentObj, { userId });
-    console.log(`[Route] ${context.route} [Type] ${context.type}`);
+    console.log(`[Route] ${context.route} [Type] ${context.type} [Items] ${context.items?.length || 0}`);
 
     // Step 3: LLM Response Generation with Retrieved Context
     const answer = await generateFinalAnswer({
@@ -34,18 +37,33 @@ exports.chatbotReply = async (req, res) => {
     let cards = [];
     try {
       if (context.items && Array.isArray(context.items) && context.items.length > 0) {
-        // Only expose safe fields for frontend card rendering
-        cards = context.items.map((it) => ({
-          id: it._id || it.productId || it.orderId || null,
-          title: it.title || it.name || it.productName || "Product",
-          price: it.price || it.totalAmount || null,
-          rating: it.rating || null,
-          image: (it.images && it.images[0]) || it.imageUrl || null,
-          features: it.features || [],
-          stock: typeof it.stock !== "undefined" ? it.stock : null,
-          category: it.category || null,
-          snippet: it.description ? (it.description.length > 140 ? it.description.slice(0, 140) + "..." : it.description) : null,
-        }));
+        // Handle both products and orders
+        cards = context.items.map((it) => {
+          // For orders
+          if (it.status) {
+            return {
+              id: it._id,
+              title: `Order ${it._id.toString().slice(-8)} - ${it.status}`,
+              price: it.totalAmount,
+              type: "order",
+              status: it.status,
+              content: it.description || "",
+            };
+          }
+          
+          // For products
+          return {
+            id: it._id || it.productId || null,
+            title: it.title || it.name || it.productName || "Product",
+            price: it.price || it.totalAmount || null,
+            rating: it.rating || null,
+            image: (it.images && it.images[0]) || it.imageUrl || null,
+            features: it.features || [],
+            stock: typeof it.stock !== "undefined" ? it.stock : null,
+            category: it.category || null,
+            snippet: it.description ? (it.description.length > 140 ? it.description.slice(0, 140) + "..." : it.description) : null,
+          };
+        });
       }
     } catch (mapErr) {
       console.error("Error mapping cards:", mapErr.message);
@@ -58,6 +76,10 @@ exports.chatbotReply = async (req, res) => {
       retrievalMethod: context.retrievalType || "none",
       datapoints: context.items?.length || 0,
       cards,
+      data: {
+        intent: intentObj.intent,
+        cards: cards,
+      },
     });
   } catch (err) {
     console.error("Chatbot error:", err);

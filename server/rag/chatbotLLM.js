@@ -397,39 +397,95 @@ function generateRecommendationResponse(query, context) {
 }
 
 /**
- * Order Tracking Response
+ * Order Tracking Response - Enhanced with detailed stage tracking
  */
 function generateOrderTrackingResponse(query, context) {
   const orders = context.items || [];
+  const orderId = context.orderId || null;
+  const mentionedProduct = context.mentionedProduct || null;
 
   if (orders.length === 0) {
+    if (orderId) {
+      return `🔍 Order **${orderId}** not found. Please check:\n• Order ID is correct\n• You are logged into the correct account\n\nNeed help? Contact support!`;
+    }
     return `You don't have any recent orders. Start shopping to place your first order! 🛍️`;
   }
 
-  let response = `### **Your Orders** 📦\n\n`;
+  let response = `## 📦 Order Tracking Details\n\n`;
 
-  orders.slice(0, 3).forEach((order, i) => {
-    const status = order.status || "Processing";
-    const statusEmoji = {
-      processing: "⏳",
-      shipped: "📦",
-      delivered: "✅",
-      cancelled: "❌",
-    }[status.toLowerCase()] || "📋";
+  // If searching for specific order, highlight it
+  if (orderId) {
+    response += `🔎 **Searching for:** ${orderId}\n\n`;
+  }
 
-    response += `**Order #${order._id.toString().slice(-6).toUpperCase()}**\n`;
-    response += `   ${statusEmoji} **Status:** ${status}\n`;
-    response += `   💰 Amount: ₹${order.totalAmount}\n`;
-    response += `   📅 Date: ${new Date(order.createdAt).toLocaleDateString()}\n`;
+  orders.slice(0, 5).forEach((order, i) => {
+    const status = (order.status || "pending").toLowerCase();
+    
+    // Status emoji mapping
+    const statusIcons = {
+      pending: { emoji: '⏳', label: 'Pending' },
+      packing: { emoji: '📦', label: 'Packing' },
+      shipped: { emoji: '🚚', label: 'Shipped' },
+      'out-for-delivery': { emoji: '🚛', label: 'Out for Delivery' },
+      delivered: { emoji: '✅', label: 'Delivered' },
+      cancelled: { emoji: '❌', label: 'Cancelled' },
+    };
+    
+    const statusInfo = statusIcons[status] || { emoji: '📋', label: status };
+    const orderNum = order._id ? order._id.toString().slice(-6).toUpperCase() : i + 1;
 
-    if (order.expectedDelivery) {
-      response += `   📍 Expected: ${new Date(order.expectedDelivery).toLocaleDateString()}\n`;
+    response += `### **Order #${orderNum}**\n`;
+    response += `**Status:** ${statusInfo.emoji} ${statusInfo.label}\n`;
+    response += `**Amount:** ₹${(order.totalAmount || 0).toLocaleString()}\n`;
+    response += `**Ordered:** ${new Date(order.createdAt).toLocaleDateString('en-IN')}\n`;
+
+    // Show ordered products
+    if (order.items && order.items.length > 0) {
+      response += `**Items:**\n`;
+      order.items.forEach(item => {
+        const title = item.title || item.name || 'Product';
+        const quantity = item.quantity || 1;
+        response += `  • ${title} (Qty: ${quantity}) - ₹${(item.price || 0).toLocaleString()}\n`;
+      });
     }
 
-    response += `\n`;
+    // Show delivery timeline
+    if (order.stages) {
+      response += `\n**Timeline:**\n`;
+      
+      const stageInfo = [
+        { key: 'packing', emoji: '📦', label: 'Packing' },
+        { key: 'shipped', emoji: '🚚', label: 'Shipped' },
+        { key: 'outForDelivery', emoji: '🚛', label: 'Out for Delivery' },
+        { key: 'delivered', emoji: '✅', label: 'Delivered' },
+      ];
+
+      stageInfo.forEach(stage => {
+        const stageData = order.stages[stage.key];
+        if (stageData) {
+          const completed = stageData.completed ? '✅' : '⏳';
+          const date = stageData.completedAt ? ` - ${new Date(stageData.completedAt).toLocaleDateString('en-IN')}` : '';
+          response += `  ${completed} ${stage.emoji} ${stage.label}${date}\n`;
+        }
+      });
+    }
+
+    // Delivery address
+    if (order.address) {
+      response += `\n**Delivery Address:**\n`;
+      response += `  ${order.address.fullAddress || order.address.street || 'N/A'}\n`;
+      if (order.address.city) response += `  ${order.address.city}${order.address.zipCode ? ' - ' + order.address.zipCode : ''}\n`;
+    }
+
+    response += `\n---\n\n`;
   });
 
-  response += `📞 Need help? Contact our support team!`;
+  response += `💬 **Questions?**\n`;
+  response += `• For delays: Reply with order number\n`;
+  response += `• For returns: Check our return policy\n`;
+  response += `• For payments: We accept COD\n\n`;
+  response += `📞 Contact: support@electromart.com | Call: 1-800-ELECTRO\n`;
+
   return response;
 }
 
